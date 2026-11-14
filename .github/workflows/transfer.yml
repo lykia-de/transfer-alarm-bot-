@@ -1,9 +1,13 @@
+
 name: Transfer Haberleri
 
 on:
   workflow_dispatch:
   schedule:
     - cron: "0 */6 * * *"
+
+permissions:
+  contents: write
 
 jobs:
   transfer:
@@ -25,4 +29,6 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: python main.py
