@@ -5,6 +5,7 @@ import base64
 import re
 import requests
 import feedparser
+from bs4 import BeautifulSoup
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
@@ -16,7 +17,6 @@ HEADERS = {
     "Accept": "application/vnd.github+json"
 }
 
-# Haber kaynakları
 SOURCES = {
     "Marca": "https://e00-marca.uecdn.es/rss/futbol/mercado-fichajes.xml",
     "CaughtOffside": "https://www.caughtoffside.com/feed/",
@@ -26,23 +26,15 @@ SOURCES = {
     "Get Football News Germany": "https://www.getfootballnewsgermany.com/feed/"
 }
 
-# Transfer haberlerini ayıklamak için kelimeler
 TRANSFER_WORDS = re.compile(
-    r"\b("
-    r"transfer|transfers|signing|signs|signed|"
-    r"loan|bid|medical|deal|contract|"
-    r"agrees|agreement|joins|completes|"
-    r"departure|leaves|interest|target|"
-    r"renewal|fichaje|fichajes|traspaso|"
-    r"cesion|firma|wechsel|leihe|"
-    r"verpflichtet|unterschreibt|angebot|"
-    r"transfermarkt|imza|kiralik|kiralık|"
-    r"anlasti|anlaştı|teklif|sozlesme|"
-    r"sözleşme|ayrildi|ayrıldı|"
-    r"transferi|transferde"
-    r")\b",
+    r"transfer|signing|signed|loan|bid|medical|deal|contract|"
+    r"agrees|agreement|joins|departure|leaves|interest|target|"
+    r"fichaje|traspaso|wechsel|leihe|verpflichtet|"
+    r"imza|kiralik|kiralık|anlasti|anlaştı|teklif|"
+    r"sozlesme|sözleşme|ayrildi|ayrıldı|transferi",
     re.IGNORECASE
 )
+
 
 def load_seen():
     url = f"https://api.github.com/repos/{REPO}/contents/seen.json"
@@ -78,6 +70,11 @@ def save_seen(seen, sha):
     r.raise_for_status()
 
 
+def clean_html(html):
+    soup = BeautifulSoup(html, "html.parser")
+    return " ".join(soup.get_text(" ").split())
+
+
 def translate(text):
     try:
         url = "https://translate.googleapis.com/translate_a/single"
@@ -90,7 +87,7 @@ def translate(text):
             "q": text
         }
 
-        r = requests.get(url, params=params, timeout=15)
+        r = requests.get(url, params=params, timeout=20)
         r.raise_for_status()
 
         return "".join(part[0] for part in r.json()[0])
@@ -98,6 +95,29 @@ def translate(text):
     except Exception as e:
         print(f"Çeviri hatası: {e}")
         return text
+
+
+def make_summary(entry):
+    description = entry.get("summary", "")
+
+    if not description and entry.get("content"):
+        description = entry["content"][0].get("value", "")
+
+    description = clean_html(description)
+
+    # Başlık dışında açıklama yoksa bu haberi atla.
+    if not description or len(description) < 60:
+        return None
+
+    # İlk birkaç cümleyi al.
+    sentences = re.split(r'(?<=[.!?])\s+', description)
+    summary = " ".join(sentences[:3]).strip()
+
+    # Telegram mesajını kısa tut.
+    if len(summary) > 600:
+        summary = summary[:597].rsplit(" ", 1)[0] + "..."
+
+    return summary
 
 
 def send_message(text):
@@ -126,7 +146,6 @@ def get_news(source_name, rss_url):
         response.raise_for_status()
 
         feed = feedparser.parse(response.content)
-
         print(f"{source_name}: {len(feed.entries)} haber bulundu")
 
         news = []
@@ -138,12 +157,17 @@ def get_news(source_name, rss_url):
             if not title or not link:
                 continue
 
-            if not TRANSFER_WORDS.search(title):
+            summary = make_summary(entry)
+
+            if not summary:
+                continue
+
+            if not TRANSFER_WORDS.search(title + " " + summary):
                 continue
 
             news.append({
                 "source": source_name,
-                "title": title,
+                "summary": summary,
                 "link": link
             })
 
@@ -175,14 +199,13 @@ for item in all_news:
     if link in new_seen:
         continue
 
-    original_title = item["title"]
-    turkish_title = translate(original_title)
+    turkish_summary = translate(item["summary"])
 
     message = (
         "⚽ TRANSFER HABERİ\n\n"
-        f"📰 {turkish_title}\n\n"
+        f"📝 ÖZET:\n{turkish_summary}\n\n"
         f"📌 Kaynak: {item['source']}\n"
-        f"🔗 {link}"
+        f"🔗 Haberin tamamı: {link}"
     )
 
     try:
@@ -191,7 +214,7 @@ for item in all_news:
         new_seen.append(link)
         sent_count += 1
 
-        print(f"Gönderildi: {item['source']} - {turkish_title}")
+        print(f"Gönderildi: {item['source']}")
 
     except Exception as e:
         print(f"Gönderim hatası: {e}")
@@ -204,4 +227,4 @@ new_seen = new_seen[-1000:]
 if new_seen != seen:
     save_seen(new_seen, sha)
 
-print(f"BOT TAMAMLANDI. Gönderilen haber: {sent_count}")
+print(f"Tamamlandı. Gönderilen haber: {sent_count}")
