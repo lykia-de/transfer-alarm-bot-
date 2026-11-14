@@ -17,9 +17,9 @@ URLS = {
     "players": BASE_URL + "player_profiles/player_profiles.csv",
     "values": BASE_URL + "player_market_value/player_market_value.csv",
     "transfers": (
-        BASE_URL
-        + "raw/player_transfer_histories/"
-        + "player_transfer_histories.csv"
+        "https://raw.githubusercontent.com/salimt/"
+        "football-datasets/main/datalake/transfermarkt/raw/"
+        "player_transfer_histories/player_transfer_histories"
     ),
 }
 
@@ -38,14 +38,14 @@ def download_csv(url):
     if content.startswith(b"\x1f\x8b"):
         content = gzip.decompress(content)
 
-    # Git LFS işaretçisi veya HTML hata sayfası kontrolü
     beginning = content[:500].decode("utf-8", errors="replace")
 
     if beginning.startswith("version https://git-lfs.github.com/spec/v1"):
-        raise RuntimeError("Dosya Git LFS işaretçisi döndürdü: " + url)
+        raise RuntimeError("Git LFS işaretçisi döndü: " + url)
 
-    if beginning.lstrip().lower().startswith("<!doctype html") or \
-       beginning.lstrip().lower().startswith("<html"):
+    if beginning.lstrip().lower().startswith(
+        ("<!doctype html", "<html")
+    ):
         raise RuntimeError("CSV yerine HTML döndü: " + url)
 
     text = io.TextIOWrapper(
@@ -180,6 +180,7 @@ def main():
     print("       RATEBROS DATABASE")
     print("===================================")
 
+    # Önce bütün kaynakları indir ve kontrol et.
     profile_rows = download_csv(URLS["players"])
     value_rows = download_csv(URLS["values"])
     transfer_rows = download_csv(URLS["transfers"])
@@ -188,10 +189,12 @@ def main():
     print("Değer satırı:", len(value_rows))
     print("Transfer satırı:", len(transfer_rows))
 
+    if len(profile_rows) < 1000:
+        raise RuntimeError("Oyuncu profil verisi eksik.")
+
     if len(transfer_rows) < 100:
         raise RuntimeError(
-            "Transfer dosyasında beklenenden az kayıt var. "
-            "Veritabanı güncellenmedi."
+            "Transfer verisi eksik veya yanlış dosya indirildi."
         )
 
     # Piyasa değerleri
@@ -268,6 +271,7 @@ def main():
             "position": get(
                 row,
                 "position",
+                "main_position",
                 "player_main_position"
             ),
             "sub_position": get(row, "player_sub_position"),
