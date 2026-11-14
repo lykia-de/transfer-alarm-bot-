@@ -26,12 +26,60 @@ SOURCES = {
     "Get Football News Germany": "https://www.getfootballnewsgermany.com/feed/"
 }
 
+# Genel ve toplu içerikleri ele
+BAD_WORDS = re.compile(
+    r"transfer window guide|transfer roundup|transfer round-up|"
+    r"all the latest transfers|transfer gossip column|"
+    r"weekly transfer|transfer tracker|"
+    r"fixtures|live scores|match report|"
+    r"predicted lineup|team news|"
+    r"haftanın transfer|transfer dosyası|"
+    r"transfer rehberi|transfer değerlendirmesi|"
+    r"transfer gündemi|son dakika programı",
+    re.IGNORECASE
+)
+
+# Somut transfer gelişmesi veya söylenti işaretleri
 TRANSFER_WORDS = re.compile(
-    r"transfer|signing|signed|loan|bid|medical|deal|contract|"
-    r"agrees|agreement|joins|departure|leaves|interest|target|"
-    r"fichaje|traspaso|wechsel|leihe|verpflichtet|"
-    r"imza|kiralik|kiralık|anlasti|anlaştı|teklif|"
-    r"sozlesme|sözleşme|ayrildi|ayrıldı|transferi",
+    r"transfer|signing|signed|signs|"
+    r"loan|bid|offer|medical|deal|contract|"
+    r"agrees|agreement|joins|departure|leaves|"
+    r"interest|interested|target|negotiations|"
+    r"talks|linked with|move for|"
+    r"wants to sign|set to join|"
+    r"fichaje|traspaso|cesion|"
+    r"wechsel|leihe|verpflichtet|"
+    r"imza|kiralik|kiralık|anlaştı|anlasti|"
+    r"teklif|sözleşme|sozlesme|"
+    r"ayrıldı|ayrildi|transferi|"
+    r"görüşme|gorusme|ilgileniyor|"
+    r"resmen|imzaladı|imzaladi",
+    re.IGNORECASE
+)
+
+OFFICIAL_WORDS = re.compile(
+    r"official|confirmed|announced|"
+    r"completes the signing|has signed|"
+    r"joins officially|"
+    r"resmen açıklandı|resmen aciklandi|"
+    r"resmen transfer oldu|"
+    r"imzaladı|imzaladi|"
+    r"transferi tamamlandı|transferi tamamlandi|"
+    r"kulübü açıkladı|kulubu acikladi",
+    re.IGNORECASE
+)
+
+RUMOUR_WORDS = re.compile(
+    r"report|reports|reportedly|rumour|rumor|"
+    r"could join|may join|interested|"
+    r"linked with|target|considering|"
+    r"talks|negotiations|bid|offer|"
+    r"set to|close to|"
+    r"iddia|iddialara göre|iddialara gore|"
+    r"gündeminde|gundeminde|ilgileniyor|"
+    r"teklif yaptı|teklif yapti|"
+    r"görüşüyor|goruşuyor|gorusuyor|"
+    r"anlaşma yakın|anlasma yakin",
     re.IGNORECASE
 )
 
@@ -59,7 +107,7 @@ def save_seen(seen, sha):
     ).decode()
 
     data = {
-        "message": "Update football news history",
+        "message": "Update transfer news history",
         "content": content
     }
 
@@ -105,19 +153,34 @@ def make_summary(entry):
 
     description = clean_html(description)
 
-    # Başlık dışında açıklama yoksa bu haberi atla.
-    if not description or len(description) < 60:
+    if len(description) < 60:
         return None
 
-    # İlk birkaç cümleyi al.
     sentences = re.split(r'(?<=[.!?])\s+', description)
     summary = " ".join(sentences[:3]).strip()
 
-    # Telegram mesajını kısa tut.
     if len(summary) > 600:
         summary = summary[:597].rsplit(" ", 1)[0] + "..."
 
     return summary
+
+
+def classify(title, summary):
+    text = title + " " + summary
+
+    if BAD_WORDS.search(text):
+        return None
+
+    if not TRANSFER_WORDS.search(text):
+        return None
+
+    if OFFICIAL_WORDS.search(text):
+        return "✅ RESMÎ TRANSFER"
+
+    if RUMOUR_WORDS.search(text):
+        return "🟠 TRANSFER SÖYLENTİSİ"
+
+    return "⚽ TRANSFER GELİŞMESİ"
 
 
 def send_message(text):
@@ -162,13 +225,17 @@ def get_news(source_name, rss_url):
             if not summary:
                 continue
 
-            if not TRANSFER_WORDS.search(title + " " + summary):
+            category = classify(title, summary)
+
+            if not category:
                 continue
 
             news.append({
                 "source": source_name,
+                "title": title,
                 "summary": summary,
-                "link": link
+                "link": link,
+                "category": category
             })
 
         return news
@@ -188,7 +255,7 @@ all_news = []
 for source_name, rss_url in SOURCES.items():
     all_news.extend(get_news(source_name, rss_url))
 
-print(f"Toplam transfer haberi: {len(all_news)}")
+print(f"Filtrelenmiş transfer haberi: {len(all_news)}")
 
 sent_count = 0
 
@@ -199,13 +266,15 @@ for item in all_news:
     if link in new_seen:
         continue
 
+    turkish_title = translate(item["title"])
     turkish_summary = translate(item["summary"])
 
     message = (
-        "⚽ TRANSFER HABERİ\n\n"
+        f"{item['category']}\n\n"
+        f"📰 {turkish_title}\n\n"
         f"📝 ÖZET:\n{turkish_summary}\n\n"
         f"📌 Kaynak: {item['source']}\n"
-        f"🔗 Haberin tamamı: {link}"
+        f"🔗 {link}"
     )
 
     try:
@@ -214,7 +283,7 @@ for item in all_news:
         new_seen.append(link)
         sent_count += 1
 
-        print(f"Gönderildi: {item['source']}")
+        print(f"Gönderildi: {item['source']} - {turkish_title}")
 
     except Exception as e:
         print(f"Gönderim hatası: {e}")
@@ -227,4 +296,4 @@ new_seen = new_seen[-1000:]
 if new_seen != seen:
     save_seen(new_seen, sha)
 
-print(f"Tamamlandı. Gönderilen haber: {sent_count}")
+print(f"BOT TAMAMLANDI. Gönderilen haber: {sent_count}")
