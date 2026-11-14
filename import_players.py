@@ -1,355 +1,285 @@
 
 import csv
 import gzip
-import io
 import json
+import os
 import re
-from datetime import datetime, date, timezone
+import tempfile
+from datetime import datetime
+from pathlib import Path
 
 import requests
 
 BASE_URL = (
-    "https://raw.githubusercontent.com/salimt/"
-    "football-datasets/main/datalake/transfermarkt/"
+    "https://raw.githubusercontent.com/"
+    "salimt/football-datasets/main/datalake/transfermarkt/"
 )
 
 URLS = {
     "players": BASE_URL + "player_profiles/player_profiles.csv",
     "values": BASE_URL + "player_market_value/player_market_value.csv",
-    "transfers": (
-        "https://raw.githubusercontent.com/salimt/"
-        "football-datasets/main/datalake/transfermarkt/raw/"
-        "player_transfer_histories/player_transfer_histories"
-    ),
 }
 
-SESSION = requests.Session()
-SESSION.headers.update({"User-Agent": "RATEBROS/1.0"})
+OUTPUT_PLAYERS = Path("players.json")
+OUTPUT_VALUES = Path("player_market_values.jsonl.gz")
+OUTPUT_TRANSFERS = Path("player_transfers.jsonl.gz")
+
+HEADERS = {"User-Agent": "RATEBROS-football-bot/1.0"}
 
 
 def download_csv(url):
-    print("İndiriliyor:", url)
-
-    response = SESSION.get(url, timeout=300)
+    response = requests.get(
+        url,
+        headers=HEADERS,
+        timeout=180,
+    )
     response.raise_for_status()
 
-    content = response.content
-
-    if content.startswith(b"\x1f\x8b"):
-        content = gzip.decompress(content)
-
-    beginning = content[:500].decode("utf-8", errors="replace")
-
-    if beginning.startswith("version https://git-lfs.github.com/spec/v1"):
-        raise RuntimeError("Git LFS işaretçisi döndü: " + url)
-
-    if beginning.lstrip().lower().startswith(
-        ("<!doctype html", "<html")
-    ):
-        raise RuntimeError("CSV yerine HTML döndü: " + url)
-
-    text = io.TextIOWrapper(
-        io.BytesIO(content),
-        encoding="utf-8-sig",
-        newline=""
-    )
-
-    reader = csv.DictReader(text)
+    text = response.content.decode("utf-8-sig")
+    reader = csv.DictReader(text.splitlines())
 
     if not reader.fieldnames:
-        raise RuntimeError("CSV başlıkları bulunamadı: " + url)
+        raise RuntimeError(f"CSV başlıkları bulunamadı: {url}")
 
-    print("CSV sütunları:", reader.fieldnames)
-
-    return list(reader)
-
-
-def clean_row(row):
-    return {
-        str(k).strip().lower().replace(" ", "_"): (v or "").strip()
-        for k, v in row.items()
-        if k is not None
-    }
+    return reader
 
 
 def get(row, *names):
-    row = clean_row(row)
+    normalized = {
+        str(key).strip().lower().replace(" ", "_"): value
+        for key, value in row.items()
+        if key is not None
+    }
 
     for name in names:
-        value = row.get(name.lower().replace(" ", "_"), "")
-        if value:
-            return value
+        value = normalized.get(name.lower().replace(" ", "_"))
+        if value is not None and str(value).strip():
+            return str(value).strip()
 
     return ""
-
-
-def parse_date(value):
-    if not value:
-        return None
-
-    value = str(value).strip()
-
-    formats = (
-        "%Y-%m-%d",
-        "%d.%m.%Y",
-        "%d/%m/%Y",
-        "%Y/%m/%d",
-    )
-
-    for fmt in formats:
-        try:
-            return datetime.strptime(value, fmt).date()
-        except ValueError:
-            pass
-
-    return None
-
-
-def calculate_age(birthday):
-    dob = parse_date(birthday)
-
-    if not dob:
-        return None
-
-    today = date.today()
-
-    return today.year - dob.year - (
-        (today.month, today.day) < (dob.month, dob.day)
-    )
 
 
 def parse_height(value):
     if not value:
         return None
 
-    value = value.lower().replace(",", ".")
-    match = re.search(r"\d+(?:\.\d+)?", value)
+    match = re.search(r"(\d+[,.]?\d*)", value)
 
     if not match:
         return None
 
-    number = float(match.group())
+    try:
+        number = float(match.group(1).replace(",", "."))
 
-    if number < 3:
-        number *= 100
+        if number < 3:
+            number *= 100
 
-    return int(round(number))
-
-
-def parse_money(value):
-    if value is None:
+        return round(number)
+    except ValueError:
         return None
 
-    value = str(value).strip()
 
-    if not value or value in ("-", "N/A", "None"):
+def parse_date(value):
+    if not value:
         return None
 
-    digits = re.sub(r"[^\d]", "", value)
+    value = value.strip()
 
-    return int(digits) if digits else None
+    formats = [
+        "%d.%m.%Y",
+        "%Y-%m-%d",
+        "%d/%m/%Y",
+    ]
+
+    for fmt in formats:
+        try:
+            return datetime.strptime(value, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
+    return value
 
 
-def date_sort_key(value):
-    parsed = parse_date(value)
-
-    if parsed:
-        return parsed.toordinal()
+def parse_number(value):
+    if not value:
+        return None
 
     try:
-        return int(float(value))
-    except (ValueError, TypeError):
-        return 0
+        return int(float(value.replace(",", ".")))
+    except (ValueError, AttributeError):
+        return None
 
 
-def write_jsonl_gz(filename, records):
+def write_json_atomic(path, data):
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+
+    with open(temp_path, "w", encoding="utf-8") as file:
+        json.dump(data, file, ensure_ascii=False)
+
+    os.replace(temp_path, path)
+
+
+def import_players():
+    print("Oyuncu profilleri indiriliyor...")
+
+    reader = download_csv(URLS["players"])
+    players = []
+    player_by_id = {}
+
+    for row in reader:
+        player_id = get(row, "player_id")
+        name = get(row, "player_name")
+
+        if not player_id or not name:
+            continue
+
+        home_name = get(row, "name_in_home_country")
+
+        aliases = []
+        if home_name and home_name.lower() != name.lower():
+            aliases.append(home_name)
+
+        player = {
+            "player_id": player_id,
+            "name": name,
+            "player_name": name,
+            "aliases": aliases,
+            "club": get(row, "current_club_name"),
+            "age": None,
+            "date_of_birth": parse_date(
+                get(row, "date_of_birth")
+            ),
+            "height": parse_height(get(row, "height")),
+            "country": get(row, "citizenship"),
+            "position": get(
+                row,
+                "player_main_position",
+                "main_position",
+                "position",
+            ),
+            "sub_position": get(
+                row,
+                "player_sub_position",
+                "sub_position",
+            ),
+            "foot": get(row, "foot"),
+            "joined": parse_date(get(row, "joined")),
+            "contract_expires": parse_date(
+                get(row, "contract_expires")
+            ),
+            "image": get(row, "player_image_url"),
+            "url": (
+                "https://www.transfermarkt.com/"
+                + get(row, "player_slug")
+                + "/profil/spieler/"
+                + player_id
+            ),
+            "current_market_value": None,
+            "highest_market_value": None,
+        }
+
+        players.append(player)
+        player_by_id[player_id] = player
+
+    if len(players) < 1000:
+        raise RuntimeError(
+            f"Profil verisi beklenenden az: {len(players)}"
+        )
+
+    print(f"Bulunan oyuncu profili: {len(players):,}")
+
+    return players, player_by_id
+
+
+def import_market_values(player_by_id):
+    print("Piyasa değerleri indiriliyor...")
+
+    reader = download_csv(URLS["values"])
     count = 0
 
-    with gzip.open(filename, "wt", encoding="utf-8") as file:
-        for record in records:
-            file.write(
+    temp_path = OUTPUT_VALUES.with_suffix(
+        OUTPUT_VALUES.suffix + ".tmp"
+    )
+
+    latest = {}
+
+    with gzip.open(
+        temp_path,
+        "wt",
+        encoding="utf-8",
+    ) as output:
+
+        for row in reader:
+            player_id = get(row, "player_id")
+            date = parse_date(get(row, "date_unix"))
+            value = parse_number(get(row, "value"))
+
+            if not player_id or not date or value is None:
+                continue
+
+            record = {
+                "player_id": player_id,
+                "date": date,
+                "value": value,
+            }
+
+            output.write(
                 json.dumps(record, ensure_ascii=False) + "\n"
             )
+
             count += 1
 
-    return count
+            previous = latest.get(player_id)
+
+            if previous is None or date >= previous["date"]:
+                latest[player_id] = record
+
+    if count < 1000:
+        os.remove(temp_path)
+        raise RuntimeError(
+            f"Piyasa değeri verisi beklenenden az: {count}"
+        )
+
+    os.replace(temp_path, OUTPUT_VALUES)
+
+    for player_id, record in latest.items():
+        player = player_by_id.get(player_id)
+
+        if player:
+            player["current_market_value"] = record["value"]
+
+    print(f"Piyasa değeri kaydı: {count:,}")
+
+
+def create_empty_transfers_file():
+    print("Transfer geçmişi şimdilik devre dışı.")
+
+    temp_path = OUTPUT_TRANSFERS.with_suffix(
+        OUTPUT_TRANSFERS.suffix + ".tmp"
+    )
+
+    with gzip.open(temp_path, "wt", encoding="utf-8"):
+        pass
+
+    os.replace(temp_path, OUTPUT_TRANSFERS)
 
 
 def main():
-    print("===================================")
-    print("       RATEBROS DATABASE")
-    print("===================================")
+    players, player_by_id = import_players()
 
-    # Önce bütün kaynakları indir ve kontrol et.
-    profile_rows = download_csv(URLS["players"])
-    value_rows = download_csv(URLS["values"])
-    transfer_rows = download_csv(URLS["transfers"])
+    import_market_values(player_by_id)
 
-    print("Profil satırı:", len(profile_rows))
-    print("Değer satırı:", len(value_rows))
-    print("Transfer satırı:", len(transfer_rows))
+    print("Oyuncu dosyası kaydediliyor...")
+    write_json_atomic(OUTPUT_PLAYERS, players)
 
-    if len(profile_rows) < 1000:
-        raise RuntimeError("Oyuncu profil verisi eksik.")
+    create_empty_transfers_file()
 
-    if len(transfer_rows) < 100:
-        raise RuntimeError(
-            "Transfer verisi eksik veya yanlış dosya indirildi."
-        )
-
-    # Piyasa değerleri
-    latest_values = {}
-    highest_values = {}
-    latest_dates = {}
-
-    def market_history():
-        for raw in value_rows:
-            row = clean_row(raw)
-
-            player_id = get(row, "player_id")
-            value_date = get(row, "date_unix", "date")
-            value = parse_money(get(row, "value", "market_value"))
-
-            if not player_id or value is None:
-                continue
-
-            old_date = latest_dates.get(player_id)
-
-            if (
-                old_date is None
-                or date_sort_key(value_date) >= date_sort_key(old_date)
-            ):
-                latest_dates[player_id] = value_date
-                latest_values[player_id] = value
-
-            highest_values[player_id] = max(
-                value,
-                highest_values.get(player_id, value)
-            )
-
-            yield {
-                "player_id": player_id,
-                "date": value_date,
-                "value_eur": value
-            }
-
-    values_count = write_jsonl_gz(
-        "player_market_values.jsonl.gz",
-        market_history()
-    )
-
-    print("Piyasa değeri geçmişi:", values_count)
-
-    # Oyuncu profilleri
-    players = []
-    seen_ids = set()
-
-    for raw in profile_rows:
-        row = clean_row(raw)
-
-        player_id = get(row, "player_id")
-        name = get(row, "player_name", "name")
-
-        if not player_id or not name or player_id in seen_ids:
-            continue
-
-        seen_ids.add(player_id)
-
-        birthday = get(row, "date_of_birth")
-
-        players.append({
-            "id": player_id,
-            "name": name,
-            "age": calculate_age(birthday),
-            "date_of_birth": birthday,
-            "height_cm": parse_height(get(row, "height")),
-            "country": get(
-                row,
-                "citizenship",
-                "citizenship_country"
-            ),
-            "position": get(
-                row,
-                "position",
-                "main_position",
-                "player_main_position"
-            ),
-            "sub_position": get(row, "player_sub_position"),
-            "foot": get(row, "foot"),
-            "club": get(
-                row,
-                "current_club",
-                "current_club_name"
-            ),
-            "club_id": get(row, "current_club_id"),
-            "joined": get(row, "joined"),
-            "contract_expires": get(row, "contract_expires"),
-            "market_value_eur": latest_values.get(player_id),
-            "market_value_date": latest_dates.get(player_id),
-            "highest_market_value_eur": highest_values.get(player_id),
-            "image_url": get(row, "player_image_url"),
-            "transfermarkt_url": get(row, "player_url", "url")
-        })
-
-    database = {
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-        "source": "salimt/football-datasets",
-        "source_type": "Transfermarkt dataset",
-        "player_count": len(players),
-        "players": players
-    }
-
-    with open("players.json", "w", encoding="utf-8") as file:
-        json.dump(
-            database,
-            file,
-            ensure_ascii=False,
-            separators=(",", ":")
-        )
-
-    print("Oyuncu profilleri:", len(players))
-
-    # Transfer geçmişi
-    def transfer_history():
-        for raw in transfer_rows:
-            row = clean_row(raw)
-
-            player_id = get(row, "player_id")
-
-            if not player_id:
-                continue
-
-            yield {
-                "transfer_id": get(row, "transfer_id"),
-                "player_id": player_id,
-                "date": get(row, "date"),
-                "season": get(row, "season"),
-                "from_club": get(
-                    row,
-                    "from_team_name",
-                    "from_club_name"
-                ),
-                "to_club": get(
-                    row,
-                    "to_team_name",
-                    "to_club_name"
-                ),
-                "transfer_fee": get(row, "transfer_fee"),
-                "value_at_transfer_eur": parse_money(
-                    get(row, "value_at_transfer")
-                )
-            }
-
-    transfers_count = write_jsonl_gz(
-        "player_transfers.jsonl.gz",
-        transfer_history()
-    )
-
-    print("Transfer geçmişi:", transfers_count)
-
-    print("===================================")
-    print("RATEBROS VERİTABANI TAMAMLANDI!")
-    print("===================================")
+    print("--------------------------------")
+    print("RATEBROS veritabanı hazır!")
+    print(f"Oyuncular: {len(players):,}")
+    print("Piyasa değerleri güncellendi.")
+    print("Transfer geçmişi şimdilik boş.")
+    print("--------------------------------")
 
 
 if __name__ == "__main__":
