@@ -3,147 +3,213 @@ import os
 import json
 import base64
 import re
+import time
 import requests
 import feedparser
 from bs4 import BeautifulSoup
+
+# ==========================================
+# AYARLAR
+# ==========================================
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 GH_TOKEN = os.environ["GITHUB_TOKEN"]
 REPO = os.environ["GITHUB_REPOSITORY"]
 
+API_URL = f"https://api.github.com/repos/{REPO}/contents/seen.json"
+
 HEADERS = {
     "Authorization": f"Bearer {GH_TOKEN}",
     "Accept": "application/vnd.github+json"
 }
 
+# ==========================================
+# HABER KAYNAKLARI
+# ==========================================
+
 SOURCES = {
     "Marca": "https://e00-marca.uecdn.es/rss/futbol/mercado-fichajes.xml",
     "CaughtOffside": "https://www.caughtoffside.com/feed/",
-    "BBC Sport": "https://feeds.bbci.co.uk/sport/football/rss.xml",
     "Sky Sports": "https://www.skysports.com/rss/11095",
     "Football Italia": "https://www.football-italia.net/feed/",
     "Get Football News Germany": "https://www.getfootballnewsgermany.com/feed/"
 }
 
-# Genel ve toplu içerikleri ele
+# ==========================================
+# TRANSFER FİLTRELERİ
+# ==========================================
+
 BAD_WORDS = re.compile(
     r"transfer window guide|transfer roundup|transfer round-up|"
     r"all the latest transfers|transfer gossip column|"
     r"weekly transfer|transfer tracker|"
     r"fixtures|live scores|match report|"
     r"predicted lineup|team news|"
-    r"haftanın transfer|transfer dosyası|"
+    r"quiz|highlights|watch live|"
     r"transfer rehberi|transfer değerlendirmesi|"
-    r"transfer gündemi|son dakika programı",
+    r"transfer dosyası|haftanın transfer",
     re.IGNORECASE
 )
 
-# Somut transfer gelişmesi veya söylenti işaretleri
 TRANSFER_WORDS = re.compile(
-    r"transfer|signing|signed|signs|"
-    r"loan|bid|offer|medical|deal|contract|"
-    r"agrees|agreement|joins|departure|leaves|"
-    r"interest|interested|target|negotiations|"
-    r"talks|linked with|move for|"
-    r"wants to sign|set to join|"
-    r"fichaje|traspaso|cesion|"
-    r"wechsel|leihe|verpflichtet|"
-    r"imza|kiralik|kiralık|anlaştı|anlasti|"
+    r"\b(?:"
+    r"transfer|transfers|transferred|"
+    r"transfer target|transfer talks|"
+    r"transfer fee|transfer bid|"
+    r"signing|signed for|signs for|"
+    r"loan deal|loan move|"
+    r"loan signing|"
+    r"bid for|offer for|"
+    r"deal agreed|agreement reached|"
+    r"agreed terms|personal terms|"
+    r"contract extension|new contract|"
+    r"contract talks|"
+    r"set to join|close to joining|"
+    r"move for|"
+    r"interested in signing|"
+    r"negotiations with|"
+    r"medical ahead of|"
+    r"fichaje|traspaso|"
+    r"wechsel|leihe|"
+    r"kiralık|kiralik|"
+    r"imza|transferi|"
     r"teklif|sözleşme|sozlesme|"
-    r"ayrıldı|ayrildi|transferi|"
-    r"görüşme|gorusme|ilgileniyor|"
-    r"resmen|imzaladı|imzaladi",
+    r"anlaştı|anlasti|"
+    r"görüşmeler|gorusmeler|"
+    r"imzaladı|imzaladi|"
+    r"resmen transfer|"
+    r"transfer görüşmesi|transfer gorusmesi"
+    r")\b",
     re.IGNORECASE
 )
 
 OFFICIAL_WORDS = re.compile(
+    r"\b(?:"
     r"official|confirmed|announced|"
-    r"completes the signing|has signed|"
+    r"completes the signing|"
+    r"has signed for|"
     r"joins officially|"
+    r"deal completed|"
     r"resmen açıklandı|resmen aciklandi|"
     r"resmen transfer oldu|"
     r"imzaladı|imzaladi|"
     r"transferi tamamlandı|transferi tamamlandi|"
-    r"kulübü açıkladı|kulubu acikladi",
+    r"kulübü açıkladı|kulubu acikladi"
+    r")\b",
     re.IGNORECASE
 )
 
 RUMOUR_WORDS = re.compile(
-    r"report|reports|reportedly|rumour|rumor|"
-    r"could join|may join|interested|"
-    r"linked with|target|considering|"
-    r"talks|negotiations|bid|offer|"
+    r"\b(?:"
+    r"reportedly|reports|report|"
+    r"rumour|rumor|"
+    r"could join|may join|"
+    r"interested in|"
+    r"linked with|"
+    r"transfer target|"
+    r"considering|"
+    r"talks|negotiations|"
+    r"bid for|offer for|"
     r"set to|close to|"
     r"iddia|iddialara göre|iddialara gore|"
-    r"gündeminde|gundeminde|ilgileniyor|"
+    r"gündeminde|gundeminde|"
+    r"ilgileniyor|"
     r"teklif yaptı|teklif yapti|"
     r"görüşüyor|goruşuyor|gorusuyor|"
-    r"anlaşma yakın|anlasma yakin",
+    r"anlaşma yakın|anlasma yakin"
+    r")\b",
     re.IGNORECASE
 )
 
+# ==========================================
+# GÖRÜLMÜŞ HABERLER
+# ==========================================
 
 def load_seen():
-    url = f"https://api.github.com/repos/{REPO}/contents/seen.json"
-    r = requests.get(url, headers=HEADERS, timeout=20)
+    response = requests.get(API_URL, headers=HEADERS, timeout=20)
 
-    if r.status_code == 200:
-        data = r.json()
-        content = base64.b64decode(data["content"]).decode()
-        return json.loads(content), data["sha"]
-
-    if r.status_code == 404:
+    if response.status_code == 404:
         return [], None
 
-    r.raise_for_status()
+    response.raise_for_status()
+
+    data = response.json()
+    content = base64.b64decode(data["content"]).decode("utf-8")
+
+    return json.loads(content), data["sha"]
 
 
 def save_seen(seen, sha):
-    url = f"https://api.github.com/repos/{REPO}/contents/seen.json"
+    content = json.dumps(
+        seen,
+        ensure_ascii=False,
+        indent=2
+    )
 
-    content = base64.b64encode(
-        json.dumps(seen, ensure_ascii=False).encode()
-    ).decode()
+    encoded = base64.b64encode(
+        content.encode("utf-8")
+    ).decode("utf-8")
 
-    data = {
-        "message": "Update transfer news history",
-        "content": content
+    payload = {
+        "message": "Transfer haberleri kaydedildi",
+        "content": encoded
     }
 
     if sha:
-        data["sha"] = sha
+        payload["sha"] = sha
 
-    r = requests.put(url, headers=HEADERS, json=data, timeout=20)
-    r.raise_for_status()
+    response = requests.put(
+        API_URL,
+        headers=HEADERS,
+        json=payload,
+        timeout=20
+    )
 
+    response.raise_for_status()
+
+
+# ==========================================
+# METİN TEMİZLEME VE ÇEVİRİ
+# ==========================================
 
 def clean_html(html):
-    soup = BeautifulSoup(html, "html.parser")
-    return " ".join(soup.get_text(" ").split())
+    soup = BeautifulSoup(html or "", "html.parser")
+    return re.sub(r"\s+", " ", soup.get_text(" ", strip=True)).strip()
 
 
 def translate(text):
+    if not text:
+        return ""
+
     try:
-        url = "https://translate.googleapis.com/translate_a/single"
+        response = requests.get(
+            "https://translate.googleapis.com/translate_a/single",
+            params={
+                "client": "gtx",
+                "sl": "auto",
+                "tl": "tr",
+                "dt": "t",
+                "q": text[:4500]
+            },
+            timeout=20
+        )
 
-        params = {
-            "client": "gtx",
-            "sl": "auto",
-            "tl": "tr",
-            "dt": "t",
-            "q": text
-        }
+        response.raise_for_status()
+        data = response.json()
 
-        r = requests.get(url, params=params, timeout=20)
-        r.raise_for_status()
+        return "".join(
+            part[0] for part in data[0] if part[0]
+        )
 
-        return "".join(part[0] for part in r.json()[0])
-
-    except Exception as e:
-        print(f"Çeviri hatası: {e}")
+    except Exception as error:
+        print("Çeviri hatası:", error)
         return text
 
+
+# ==========================================
+# HABER ÖZETİ
+# ==========================================
 
 def make_summary(entry):
     description = entry.get("summary", "")
@@ -153,40 +219,60 @@ def make_summary(entry):
 
     description = clean_html(description)
 
-    if len(description) < 60:
-        return None
+    if len(description) < 40:
+        return ""
 
-    sentences = re.split(r'(?<=[.!?])\s+', description)
-    summary = " ".join(sentences[:3]).strip()
+    sentences = re.split(r"(?<=[.!?])\s+", description)
 
-    if len(summary) > 600:
-        summary = summary[:597].rsplit(" ", 1)[0] + "..."
+    summary = " ".join(sentences[:3])
 
-    return summary
+    return summary[:600]
 
+
+# ==========================================
+# HABER SINIFLANDIRMA
+# ==========================================
 
 def classify(title, summary):
-    text = title + " " + summary
+    title = title.strip()
+    summary = summary.strip()
 
-    if BAD_WORDS.search(text):
+    if BAD_WORDS.search(title):
         return None
 
-    if not TRANSFER_WORDS.search(text):
-        return None
+    # Öncelikle başlıkta transfer işareti arıyoruz.
+    if TRANSFER_WORDS.search(title):
+        text = title + " " + summary
 
-    if OFFICIAL_WORDS.search(text):
-        return "✅ RESMÎ TRANSFER"
+        if OFFICIAL_WORDS.search(text):
+            return "✅ RESMÎ TRANSFER"
 
-    if RUMOUR_WORDS.search(text):
-        return "🟠 TRANSFER SÖYLENTİSİ"
+        if RUMOUR_WORDS.search(text):
+            return "🟠 TRANSFER SÖYLENTİSİ"
 
-    return "⚽ TRANSFER GELİŞMESİ"
+        return "⚽ TRANSFER GELİŞMESİ"
 
+    # Başlıkta yoksa özette daha güçlü transfer ifadeleri arıyoruz.
+    if TRANSFER_WORDS.search(summary):
+        if OFFICIAL_WORDS.search(summary):
+            return "✅ RESMÎ TRANSFER"
+
+        if RUMOUR_WORDS.search(summary):
+            return "🟠 TRANSFER SÖYLENTİSİ"
+
+        return "⚽ TRANSFER GELİŞMESİ"
+
+    return None
+
+
+# ==========================================
+# TELEGRAM
+# ==========================================
 
 def send_message(text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 
-    r = requests.post(
+    response = requests.post(
         url,
         data={
             "chat_id": CHAT_ID,
@@ -196,28 +282,44 @@ def send_message(text):
         timeout=20
     )
 
-    r.raise_for_status()
+    response.raise_for_status()
 
+
+# ==========================================
+# RSS HABERLERİNİ AL
+# ==========================================
 
 def get_news(source_name, rss_url):
+    articles = []
+
     try:
         response = requests.get(
             rss_url,
-            headers={"User-Agent": "Mozilla/5.0 FootballNewsBot/1.0"},
+            headers={"User-Agent": "Mozilla/5.0"},
             timeout=25
         )
+
         response.raise_for_status()
 
         feed = feedparser.parse(response.content)
-        print(f"{source_name}: {len(feed.entries)} haber bulundu")
-
-        news = []
 
         for entry in feed.entries:
-            title = entry.get("title", "").strip()
+            title = clean_html(entry.get("title", ""))
             link = entry.get("link", "").strip()
 
             if not title or not link:
+                continue
+
+            # Video ve yayın sayfalarını ele.
+            lowered_link = link.lower()
+
+            if any(word in lowered_link for word in [
+                "/iplayer/",
+                "/video/",
+                "/watch/",
+                "/live/",
+                "/podcast/"
+            ]):
                 continue
 
             summary = make_summary(entry)
@@ -230,7 +332,7 @@ def get_news(source_name, rss_url):
             if not category:
                 continue
 
-            news.append({
+            articles.append({
                 "source": source_name,
                 "title": title,
                 "summary": summary,
@@ -238,62 +340,79 @@ def get_news(source_name, rss_url):
                 "category": category
             })
 
-        return news
+    except Exception as error:
+        print(f"{source_name} RSS hatası: {error}")
 
-    except Exception as e:
-        print(f"{source_name} kaynak hatası: {e}")
-        return []
+    return articles
 
 
-# BOT BAŞLIYOR
+# ==========================================
+# ANA PROGRAM
+# ==========================================
 
-seen, sha = load_seen()
-new_seen = list(seen)
+def main():
+    print("Transfer botu başladı.")
 
-all_news = []
+    seen, sha = load_seen()
+    seen_set = set(seen)
 
-for source_name, rss_url in SOURCES.items():
-    all_news.extend(get_news(source_name, rss_url))
+    new_articles = []
 
-print(f"Filtrelenmiş transfer haberi: {len(all_news)}")
+    for source_name, rss_url in SOURCES.items():
+        print(f"{source_name} kontrol ediliyor...")
 
-sent_count = 0
+        articles = get_news(source_name, rss_url)
 
-for item in all_news:
+        for article in articles:
+            if article["link"] in seen_set:
+                continue
 
-    link = item["link"]
+            new_articles.append(article)
 
-    if link in new_seen:
-        continue
+    # Aynı linki farklı kaynaklardan gelirse bir kez gönder.
+    unique_articles = []
+    added_links = set()
 
-    turkish_title = translate(item["title"])
-    turkish_summary = translate(item["summary"])
+    for article in new_articles:
+        if article["link"] not in added_links:
+            unique_articles.append(article)
+            added_links.add(article["link"])
 
-    message = (
-        f"{item['category']}\n\n"
-        f"📰 {turkish_title}\n\n"
-        f"📝 ÖZET:\n{turkish_summary}\n\n"
-        f"📌 Kaynak: {item['source']}\n"
-        f"🔗 {link}"
-    )
+    sent_count = 0
 
-    try:
-        send_message(message)
+    for article in unique_articles[:10]:
+        title_tr = translate(article["title"])
+        summary_tr = translate(article["summary"])
 
-        new_seen.append(link)
-        sent_count += 1
+        message = (
+            f"{article['category']}\n\n"
+            f"📰 {title_tr}\n\n"
+            f"📝 ÖZET:\n{summary_tr}\n\n"
+            f"📌 Kaynak: {article['source']}\n"
+            f"🔗 {article['link']}"
+        )
 
-        print(f"Gönderildi: {item['source']} - {turkish_title}")
+        try:
+            send_message(message)
 
-    except Exception as e:
-        print(f"Gönderim hatası: {e}")
+            seen.append(article["link"])
+            seen_set.add(article["link"])
 
-    if sent_count >= 10:
-        break
+            sent_count += 1
+            print("Gönderildi:", article["title"])
 
-new_seen = new_seen[-1000:]
+            time.sleep(1)
 
-if new_seen != seen:
-    save_seen(new_seen, sha)
+        except Exception as error:
+            print("Telegram gönderim hatası:", error)
 
-print(f"BOT TAMAMLANDI. Gönderilen haber: {sent_count}")
+    # Liste çok büyümesin.
+    seen = seen[-3000:]
+
+    save_seen(seen, sha)
+
+    print(f"İşlem tamamlandı. Gönderilen haber: {sent_count}")
+
+
+if __name__ == "__main__":
+    main()
