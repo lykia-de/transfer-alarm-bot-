@@ -12,6 +12,10 @@ from html import escape
 import requests
 import feedparser
 
+# ==============================
+# RATEBROS AYARLARI
+# ==============================
+
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
@@ -30,20 +34,25 @@ RSS_SOURCES = {
     "Get Football News Germany": "https://www.getfootballnewsgermany.com/feed/",
 }
 
+# Tek başına "agreed" gibi kelimeler transfer anlamına gelmez.
 TRANSFER_WORDS = [
-    "transfer", "transfers", "sign", "signing", "signed",
-    "deal", "agreement", "agreed", "bid", "offer", "loan",
-    "join", "joined", "leaves", "departure", "contract",
-    "rejects", "interested", "interest", "fichaje",
-    "fichajes", "ficha", "fichar", "acuerdo", "oferta",
-    "cesion", "salida", "llegada", "mercado", "quiere",
-    "vuelta", "wechsel", "verpflichtet", "leihe",
-    "angebot", "vertrag", "trasferimento", "accordo",
-    "offerta", "cessione", "transfert", "accord",
-    "signe", "ya es del", "close to", "set to join",
-    "set to sign", "race to sign"
+    "transfer", "transfermarkt", "transfer window",
+    "signing", "signed for", "signs for",
+    "sign for", "set to sign", "set to join",
+    "joins", "joined", "loan move", "on loan",
+    "contract offer", "new contract", "contract extension",
+    "bid for", "offers for", "offer for",
+    "deal with", "transfer deal", "move to",
+    "fichaje", "fichajes", "ficha por", "fichar por",
+    "acuerdo de fichaje", "oferta por", "cesion",
+    "mercado de fichajes", "salida del club",
+    "wechsel zu", "verpflichtet", "leihe zu",
+    "transferiert", "trasferimento", "accordo",
+    "offerta per", "transfert", "accord de transfert",
+    "signe avec", "arrivee au club",
 ]
 
+# Alternatif oyuncu isimleri
 PLAYER_ALIASES = [
     "Joao Felix", "Joao Cancelo", "Joao Neves",
     "Harry Kane", "Dani Carvajal", "Dani Parejo",
@@ -61,9 +70,12 @@ PLAYER_ALIASES = [
     "Mauro Icardi", "Baris Alper Yilmaz", "Orkun Kokcu",
     "Kenan Yildiz", "Hakan Calhanoglu", "Arda Guler",
     "Ferdi Kadioglu", "Enes Unal", "Antony", "Neymar",
-    "Rodri", "Endrick"
+    "Rodri", "Endrick", "Felix Nmecha",
 ]
 
+# ==============================
+# METİN İŞLEME
+# ==============================
 
 def normalize(value):
     value = str(value or "").lower()
@@ -78,6 +90,7 @@ def normalize(value):
 
 def extract_names(data):
     names = set()
+
     fields = (
         "name", "player_name", "full_name",
         "player", "playerName", "fullName"
@@ -87,8 +100,10 @@ def extract_names(data):
         if isinstance(obj, dict):
             for field in fields:
                 value = obj.get(field)
+
                 if isinstance(value, str):
                     value = value.strip()
+
                     if len(value.split()) >= 2 and len(value) >= 5:
                         names.add(value)
 
@@ -104,6 +119,10 @@ def extract_names(data):
     return names
 
 
+# ==============================
+# OYUNCU İNDEKSİ
+# ==============================
+
 def load_players():
     names = set(PLAYER_ALIASES)
 
@@ -112,7 +131,7 @@ def load_players():
             data = json.load(f)
 
         names.update(extract_names(data))
-        print(f"Oyuncu isimleri: {len(names):,}")
+        print(f"Oyuncu veritabanı: {len(names):,} isim")
 
     except Exception as error:
         print("Oyuncu veritabanı hatası:", error)
@@ -120,43 +139,36 @@ def load_players():
     return names
 
 
-# =====================================================
-# HIZLI İSİM İNDEKSİ
-# =====================================================
-
-def build_player_index(names):
-    full_name_index = {}
+def build_indexes(names):
+    full_index = {}
     surname_candidates = defaultdict(set)
 
     for name in names:
         tokens = normalize(name)
 
-        if not tokens:
+        if len(tokens) < 2:
             continue
 
-        # Tam isim indeksi
-        node = full_name_index
+        node = full_index
 
         for token in tokens:
             node = node.setdefault(token, {})
 
         node.setdefault("_names", []).append(name)
 
-        # Soyadı indeksi
-        if len(tokens) >= 2:
-            surname_candidates[tokens[-1]].add(name)
+        surname_candidates[tokens[-1]].add(name)
 
-    # Yalnızca tek oyuncuya ait soyadları otomatik eşleştir.
+    # Sadece tek bir oyuncuya ait soyadlarını kullan.
     unique_surnames = {
         surname: next(iter(candidates))
         for surname, candidates in surname_candidates.items()
         if len(candidates) == 1
     }
 
-    print("Tam isim indeksi hazır.")
-    print("Benzersiz soyadı sayısı:", len(unique_surnames))
+    print("Oyuncu indeksi hazır.")
+    print("Benzersiz soyadı:", len(unique_surnames))
 
-    return full_name_index, unique_surnames
+    return full_index, unique_surnames
 
 
 def find_players(title, indexes):
@@ -164,7 +176,7 @@ def find_players(title, indexes):
     words = normalize(title)
     found = []
 
-    # Önce tam isimleri bul.
+    # Önce tam isim eşleşmesi.
     for start in range(len(words)):
         node = full_index
 
@@ -180,19 +192,38 @@ def find_players(title, indexes):
                 if name not in found:
                     found.append(name)
 
-    # Sonra benzersiz soyadlarını kontrol et.
-    for word in words:
-        name = surname_index.get(word)
+    # Soyadı eşleşmesi: yalnızca benzersiz soyadları.
+    # Soyadından hemen sonra başka bir büyük harfle
+    # başlayan isim varsa eşleşmeyi atla.
+    raw_words = re.findall(r"\b[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'-]*\b", title)
 
-        if name and name not in found:
+    for i, raw_word in enumerate(raw_words):
+        token = normalize(raw_word)
+
+        if len(token) != 1:
+            continue
+
+        surname = token[0]
+        name = surname_index.get(surname)
+
+        if not name:
+            continue
+
+        if i + 1 < len(raw_words):
+            next_word = raw_words[i + 1]
+
+            if next_word[:1].isupper():
+                continue
+
+        if name not in found:
             found.append(name)
 
     return found
 
 
-# =====================================================
-# HABER FİLTRELEME
-# =====================================================
+# ==============================
+# TRANSFER FİLTRESİ
+# ==============================
 
 def is_transfer_news(title):
     normalized = " ".join(normalize(title))
@@ -203,41 +234,54 @@ def is_transfer_news(title):
     )
 
 
-def classify_news(title):
-    # RSS başlığı tek başına resmî doğrulama değildir.
-    strong_phrases = [
-        "agreement reached",
-        "deal agreed",
-        "completes move",
-        "principio de acuerdo",
-        "acuerdo cerrado",
-        "ficha por",
-        "signed for",
-        "signs for",
-        "joins"
-    ]
+# ==============================
+# TÜRKÇE ÇEVİRİ
+# ==============================
 
-    normalized = " ".join(normalize(title))
+def translate_to_turkish(text):
+    if not text:
+        return text
 
-    if any(
-        " ".join(normalize(phrase)) in normalized
-        for phrase in strong_phrases
-    ):
-        return "🟡 TRANSFER İDDİASI"
+    try:
+        response = requests.get(
+            "https://translate.googleapis.com/translate_a/single",
+            params={
+                "client": "gtx",
+                "sl": "auto",
+                "tl": "tr",
+                "dt": "t",
+                "q": text,
+            },
+            headers=HEADERS,
+            timeout=8,
+        )
 
-    return "⚪ TRANSFER SÖYLENTİSİ"
+        response.raise_for_status()
+        data = response.json()
+
+        translated = "".join(
+            part[0]
+            for part in data[0]
+            if part and part[0]
+        )
+
+        return translated.strip() or text
+
+    except Exception as error:
+        print("Çeviri yapılamadı:", error)
+        return text
 
 
-# =====================================================
-# RSS
-# =====================================================
+# ==============================
+# RSS HABERLERİ
+# ==============================
 
 def fetch_feed(source, url):
     try:
         response = requests.get(
             url,
             headers=HEADERS,
-            timeout=12
+            timeout=12,
         )
         response.raise_for_status()
 
@@ -255,14 +299,14 @@ def fetch_feed(source, url):
                 "source": source,
                 "title": title,
                 "link": link,
-                "id": entry.get("id") or link
+                "id": entry.get("id") or link,
             })
 
         print(f"{source}: {len(articles)} haber")
         return articles
 
     except Exception as error:
-        print(f"{source} hatası:", error)
+        print(f"{source} RSS hatası:", error)
         return []
 
 
@@ -290,9 +334,9 @@ def get_all_news():
     return list(unique.values())
 
 
-# =====================================================
+# ==============================
 # GÖRÜLEN HABERLER
-# =====================================================
+# ==============================
 
 def github_url():
     if not GITHUB_REPOSITORY:
@@ -308,7 +352,7 @@ def github_headers():
     return {
         "Authorization": f"Bearer {GITHUB_TOKEN}",
         "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28"
+        "X-GitHub-Api-Version": "2022-11-28",
     }
 
 
@@ -320,7 +364,7 @@ def load_seen():
             response = requests.get(
                 url,
                 headers=github_headers(),
-                timeout=12
+                timeout=12,
             )
 
             if response.status_code == 200:
@@ -356,7 +400,7 @@ def save_seen(seen):
         response = requests.get(
             url,
             headers=github_headers(),
-            timeout=12
+            timeout=12,
         )
 
         sha = None
@@ -370,14 +414,14 @@ def save_seen(seen):
         content = json.dumps(
             data,
             ensure_ascii=False,
-            indent=2
+            indent=2,
         )
 
         payload = {
             "message": "Update RATEBROS seen news",
             "content": base64.b64encode(
                 content.encode("utf-8")
-            ).decode("utf-8")
+            ).decode("utf-8"),
         }
 
         if sha:
@@ -387,7 +431,7 @@ def save_seen(seen):
             url,
             headers=github_headers(),
             json=payload,
-            timeout=15
+            timeout=15,
         )
 
         if result.status_code in (200, 201):
@@ -399,25 +443,24 @@ def save_seen(seen):
         print("GitHub kayıt hatası:", error)
 
 
-# =====================================================
+# ==============================
 # TELEGRAM
-# =====================================================
+# ==============================
 
 def send_telegram(article, players):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-
-    status = classify_news(article["title"])
-    player_text = ", ".join(players)
+    translated_title = translate_to_turkish(article["title"])
 
     message = (
         "🚨 <b>RATEBROS TRANSFER ALARMI</b>\n\n"
-        f"<b>{status}</b>\n\n"
-        f"⚽ <b>Oyuncu:</b> {escape(player_text)}\n"
-        f"📰 <b>Haber:</b> {escape(article['title'])}\n"
+        "🟡 <b>TRANSFER İDDİASI</b>\n\n"
+        f"⚽ <b>Oyuncu:</b> {escape(', '.join(players))}\n"
+        f"📰 <b>Haber:</b> {escape(translated_title)}\n"
         f"🌍 <b>Kaynak:</b> {escape(article['source'])}\n\n"
-        "⚠️ Transfer resmî olarak doğrulanmadı.\n\n"
+        "⚠️ <b>Transfer resmî olarak doğrulanmadı.</b>\n\n"
         f'<a href="{escape(article["link"], quote=True)}">Haberi Oku</a>'
     )
+
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
     try:
         response = requests.post(
@@ -426,13 +469,13 @@ def send_telegram(article, players):
                 "chat_id": CHAT_ID,
                 "text": message,
                 "parse_mode": "HTML",
-                "disable_web_page_preview": True
+                "disable_web_page_preview": True,
             },
-            timeout=15
+            timeout=15,
         )
 
         if response.status_code == 200:
-            print("Telegram gönderildi:", article["title"])
+            print("Telegram gönderildi:", translated_title)
             return True
 
         print("Telegram hatası:", response.text[:250])
@@ -443,9 +486,9 @@ def send_telegram(article, players):
         return False
 
 
-# =====================================================
+# ==============================
 # ANA PROGRAM
-# =====================================================
+# ==============================
 
 def main():
     started = time.time()
@@ -459,23 +502,22 @@ def main():
         return
 
     players = load_players()
-    indexes = build_player_index(players)
+    indexes = build_indexes(players)
 
-    print("\nİSİM TESTLERİ")
+    print("\nEŞLEŞTİRME TESTLERİ")
 
-    test_titles = [
+    tests = [
+        "Alaba ficha por Udinese tras su salida del Real Madrid",
+        "Jürgen Klopp confirms Felix Nmecha has agreed to stop controversial goal celebration",
         "Principio de acuerdo Bayern-Kane",
         "Carvajal ya es del Getafe",
-        "Alaba ficha por Udinese",
-        "Haaland transfer news",
-        "Fernandes rejects contract offer",
-        "Joao Felix to Al Nassr"
     ]
 
-    for title in test_titles:
+    for title in tests:
         print(title, "=>", find_players(title, indexes))
 
     print("\nRSS kontrol ediliyor...")
+
     articles = get_all_news()
     seen = load_seen()
 
@@ -487,18 +529,16 @@ def main():
         if article["id"] in seen:
             continue
 
-        title = article["title"]
-
-        if not is_transfer_news(title):
+        if not is_transfer_news(article["title"]):
             continue
 
-        matched = find_players(title, indexes)
+        matched = find_players(article["title"], indexes)
 
         if not matched:
-            print("Oyuncu bulunamadı:", title)
+            print("Oyuncu eşleşmedi:", article["title"])
             continue
 
-        print("ONAYLANDI:", title)
+        print("ONAYLANDI:", article["title"])
         print("Oyuncular:", matched)
 
         approved.append((article, matched))
