@@ -31,7 +31,8 @@ jobs:
       - name: Değişiklikleri kaydet
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.git add players.json player_market_values.jsonl.gz player_transfers.jsonl.gz
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add players.json player_market_values.jsonl.gz player_transfers.jsonl.gz
           git diff --cached --quiet || git commit -m "Update player database"
           git push
 
