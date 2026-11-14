@@ -4,7 +4,7 @@ import json
 import base64
 import re
 import time
-import requests 
+import requests
 import feedparser
 from bs4 import BeautifulSoup
 
@@ -37,12 +37,53 @@ SOURCES = {
 }
 
 # ==========================================
-# FİLTRELER
+# BÜYÜK KULÜP TAKİBİ
+# ==========================================
+
+CLUBS = {
+    "Real Madrid": ["real madrid", "realmadrid"],
+    "Barcelona": ["barcelona", "barça", "barca"],
+    "Atletico Madrid": ["atletico madrid", "atlético madrid"],
+    "Arsenal": ["arsenal"],
+    "Manchester City": ["manchester city", "man city"],
+    "Manchester United": ["manchester united", "man utd", "man united"],
+    "Liverpool": ["liverpool"],
+    "Chelsea": ["chelsea"],
+    "Tottenham": ["tottenham", "spurs"],
+    "Newcastle": ["newcastle united", "newcastle"],
+    "Bayern Munich": ["bayern munich", "bayern münchen", "fc bayern"],
+    "Borussia Dortmund": ["borussia dortmund", "dortmund", "bvb"],
+    "Bayer Leverkusen": ["bayer leverkusen", "leverkusen"],
+    "RB Leipzig": ["rb leipzig"],
+    "PSG": ["paris saint-germain", "paris saint germain", "psg"],
+    "Inter": ["inter milan", "internazionale"],
+    "AC Milan": ["ac milan"],
+    "Juventus": ["juventus"],
+    "Napoli": ["napoli"],
+    "Roma": ["as roma"],
+    "Beşiktaş": ["besiktas", "beşiktaş"],
+    "Galatasaray": ["galatasaray"],
+    "Fenerbahçe": ["fenerbahce", "fenerbahçe"],
+    "Trabzonspor": ["trabzonspor"],
+    "Ajax": ["ajax"],
+    "Benfica": ["benfica"],
+    "Porto": ["fc porto", "porto"],
+    "Sporting": ["sporting lisbon", "sporting cp"],
+    "Al Nassr": ["al nassr"],
+    "Al Hilal": ["al hilal"],
+    "Al Ittihad": ["al ittihad"],
+    "Al Ahli": ["al ahli"]
+}
+
+# ==========================================
+# HABER FİLTRELERİ
 # ==========================================
 
 BAD_WORDS = re.compile(
     r"transfer window guide|transfer roundup|transfer round-up|"
     r"weekly transfer|transfer tracker|"
+    r"transfer centre live|transfer center live|"
+    r"transfer live blog|"
     r"fixtures|live scores|match report|"
     r"predicted lineup|team news|"
     r"quiz|crossword|podcast",
@@ -51,42 +92,36 @@ BAD_WORDS = re.compile(
 
 TRANSFER_SIGNAL = re.compile(
     r"\b(?:"
-    r"transfers?|transferred|"
-    r"fichajes?|fichaje|traspasos?|"
+    r"transfer|transfers|transferred|"
+    r"fichaje|fichajes|traspaso|traspasos|"
     r"mercato|wechsel|leihe|"
     r"signing|signed|signs|"
     r"joins|joined|"
     r"loan|bid|offer|"
     r"contract|negotiations|"
     r"talks|interested|interest|"
-    r"transfer target|"
-    r"linked with|"
+    r"transfer target|linked with|"
     r"agrees|agreement|"
-    r"deal agreed|"
-    r"set to join|"
+    r"deal agreed|set to join|"
     r"move for|"
     r"imza|kiralık|kiralik|"
-    r"anlaştı|anlasti|"
-    r"teklif|sözleşme|sozlesme|"
+    r"anlaştı|anlasti|teklif|"
+    r"sözleşme|sozlesme|"
     r"görüşme|gorusme|"
-    r"ilgileniyor|"
-    r"imzaladı|imzaladi|"
-    r"resmen transfer"
+    r"ilgileniyor|imzaladı|imzaladi"
     r")\b",
     re.IGNORECASE
 )
 
-STRONG_SUMMARY_SIGNAL = re.compile(
+SUMMARY_SIGNAL = re.compile(
     r"\b(?:"
     r"transfer|fichaje|traspaso|mercato|wechsel|"
     r"transfer talks|transfer target|"
     r"loan move|loan deal|"
     r"bid for|offer for|"
     r"contract extension|"
-    r"personal terms|"
-    r"medical ahead of|"
-    r"deal agreed|"
-    r"negotiations with|"
+    r"personal terms|medical ahead of|"
+    r"deal agreed|negotiations with|"
     r"imza|kiralık|kiralik|"
     r"transferi|teklif|"
     r"görüşmeler|gorusmeler|"
@@ -96,17 +131,25 @@ STRONG_SUMMARY_SIGNAL = re.compile(
 )
 
 OFFICIAL_WORDS = re.compile(
-    r"\b(?:"
-    r"official|confirmed|announced|"
-    r"completes the signing|"
+    r"officially signed|official announcement|"
+    r"deal completed|transfer completed|"
     r"has signed for|"
-    r"deal completed|"
     r"resmen açıklandı|resmen aciklandi|"
     r"resmen transfer oldu|"
-    r"imzaladı|imzaladi|"
     r"transferi tamamlandı|transferi tamamlandi|"
-    r"kulübü açıkladı|kulubu acikladi"
-    r")\b",
+    r"kulübü açıkladı|kulubu acikladi|"
+    r"imzayı attı|imzayi atti",
+    re.IGNORECASE
+)
+
+STRONG_WORDS = re.compile(
+    r"bid accepted|agreement reached|"
+    r"personal terms agreed|"
+    r"medical scheduled|medical completed|"
+    r"deal agreed|advanced talks|"
+    r"final stages|"
+    r"teklif kabul edildi|"
+    r"anlaşma sağlandı|anlasma saglandi",
     re.IGNORECASE
 )
 
@@ -132,7 +175,11 @@ RUMOUR_WORDS = re.compile(
 # ==========================================
 
 def load_seen():
-    response = requests.get(API_URL, headers=HEADERS, timeout=20)
+    response = requests.get(
+        API_URL,
+        headers=HEADERS,
+        timeout=20
+    )
 
     if response.status_code == 404:
         return [], None
@@ -140,7 +187,9 @@ def load_seen():
     response.raise_for_status()
 
     data = response.json()
-    content = base64.b64decode(data["content"]).decode("utf-8")
+    content = base64.b64decode(
+        data["content"]
+    ).decode("utf-8")
 
     return json.loads(content), data["sha"]
 
@@ -179,13 +228,21 @@ def save_seen(seen, sha):
 # ==========================================
 
 def clean_html(html):
-    soup = BeautifulSoup(html or "", "html.parser")
+    soup = BeautifulSoup(
+        html or "",
+        "html.parser"
+    )
+
     return re.sub(
         r"\s+",
         " ",
         soup.get_text(" ", strip=True)
     ).strip()
 
+
+# ==========================================
+# TÜRKÇE ÇEVİRİ
+# ==========================================
 
 def translate(text):
     if not text:
@@ -234,11 +291,32 @@ def make_summary(entry):
     if not description:
         return "Kaynakta ayrıntılı haber özeti bulunmuyor."
 
-    sentences = re.split(r"(?<=[.!?])\s+", description)
+    sentences = re.split(
+        r"(?<=[.!?])\s+",
+        description
+    )
 
-    summary = " ".join(sentences[:3])
+    return " ".join(sentences[:3])[:600]
 
-    return summary[:600]
+
+# ==========================================
+# KULÜP TESPİTİ
+# ==========================================
+
+def find_clubs(title, summary):
+    text = (title + " " + summary).lower()
+
+    found = []
+
+    for club, aliases in CLUBS.items():
+        for alias in aliases:
+            pattern = r"(?<!\w)" + re.escape(alias) + r"(?!\w)"
+
+            if re.search(pattern, text):
+                found.append(club)
+                break
+
+    return found
 
 
 # ==========================================
@@ -249,31 +327,43 @@ def classify(title, summary):
     if BAD_WORDS.search(title):
         return None
 
-    # Başlıkta transfer işareti varsa kabul et.
-    if TRANSFER_SIGNAL.search(title):
-        text = title + " " + summary
+    text = title + " " + summary
 
-        if OFFICIAL_WORDS.search(text):
-            return "✅ RESMÎ TRANSFER"
+    if not (
+        TRANSFER_SIGNAL.search(title)
+        or SUMMARY_SIGNAL.search(summary)
+    ):
+        return None
 
-        if RUMOUR_WORDS.search(text):
-            return "🟠 TRANSFER SÖYLENTİSİ"
+    if OFFICIAL_WORDS.search(text):
+        return "✅ RESMÎ TRANSFER"
 
-        return "⚽ TRANSFER GELİŞMESİ"
+    if STRONG_WORDS.search(text):
+        return "🔥 GÜÇLÜ TRANSFER İDDİASI"
 
-    # Başlıkta bulunmuyorsa özette daha güçlü işaret ara.
-    if STRONG_SUMMARY_SIGNAL.search(summary):
-        text = title + " " + summary
+    if RUMOUR_WORDS.search(text):
+        return "🟠 TRANSFER SÖYLENTİSİ"
 
-        if OFFICIAL_WORDS.search(text):
-            return "✅ RESMÎ TRANSFER"
+    return "⚽ TRANSFER GELİŞMESİ"
 
-        if RUMOUR_WORDS.search(text):
-            return "🟠 TRANSFER SÖYLENTİSİ"
 
-        return "⚽ TRANSFER GELİŞMESİ"
+# ==========================================
+# HABER ÖNCELİĞİ
+# ==========================================
 
-    return None
+def article_priority(article):
+    category = article["category"]
+
+    if "RESMÎ" in category:
+        return 4
+
+    if "GÜÇLÜ" in category:
+        return 3
+
+    if "SÖYLENTİSİ" in category:
+        return 2
+
+    return 1
 
 
 # ==========================================
@@ -314,10 +404,16 @@ def get_news(source_name, rss_url):
 
         feed = feedparser.parse(response.content)
 
-        print(f"{source_name}: RSS toplam haber: {len(feed.entries)}")
+        print(
+            f"{source_name}: RSS toplam haber: "
+            f"{len(feed.entries)}"
+        )
 
         for entry in feed.entries:
-            title = clean_html(entry.get("title", ""))
+            title = clean_html(
+                entry.get("title", "")
+            )
+
             link = entry.get("link", "").strip()
 
             if not title or not link:
@@ -341,12 +437,15 @@ def get_news(source_name, rss_url):
             if not category:
                 continue
 
+            clubs = find_clubs(title, summary)
+
             articles.append({
                 "source": source_name,
                 "title": title,
                 "summary": summary,
                 "link": link,
-                "category": category
+                "category": category,
+                "clubs": clubs
             })
 
         print(
@@ -355,7 +454,9 @@ def get_news(source_name, rss_url):
         )
 
     except Exception as error:
-        print(f"{source_name} RSS HATASI: {error}")
+        print(
+            f"{source_name} RSS HATASI: {error}"
+        )
 
     return articles
 
@@ -367,6 +468,7 @@ def get_news(source_name, rss_url):
 def main():
     print("================================")
     print("RATEBROS TRANSFER BOTU BAŞLADI")
+    print("YENİ SÜRÜM: KULÜP TAKİBİ AKTİF")
     print("================================")
 
     seen, sha = load_seen()
@@ -377,13 +479,16 @@ def main():
     for source_name, rss_url in SOURCES.items():
         print(f"\n{source_name} kontrol ediliyor...")
 
-        articles = get_news(source_name, rss_url)
+        articles = get_news(
+            source_name,
+            rss_url
+        )
 
         for article in articles:
             if article["link"] not in seen_set:
                 new_articles.append(article)
 
-    # Tekrarlanan haberleri temizle.
+    # Aynı haberleri temizle.
     unique_articles = []
     added_links = set()
 
@@ -391,6 +496,12 @@ def main():
         if article["link"] not in added_links:
             unique_articles.append(article)
             added_links.add(article["link"])
+
+    # Önce resmî ve güçlü haberler.
+    unique_articles.sort(
+        key=article_priority,
+        reverse=True
+    )
 
     print("\nToplam yeni haber:", len(unique_articles))
 
@@ -400,10 +511,16 @@ def main():
         title_tr = translate(article["title"])
         summary_tr = translate(article["summary"])
 
+        if article["clubs"]:
+            clubs_text = ", ".join(article["clubs"])
+        else:
+            clubs_text = "Belirlenemedi"
+
         message = (
             f"{article['category']}\n\n"
             f"📰 {title_tr}\n\n"
             f"📝 ÖZET:\n{summary_tr}\n\n"
+            f"🏟️ KULÜPLER: {clubs_text}\n\n"
             f"📌 Kaynak: {article['source']}\n"
             f"🔗 {article['link']}"
         )
@@ -416,12 +533,18 @@ def main():
 
             sent_count += 1
 
-            print("Gönderildi:", article["title"])
+            print(
+                "Gönderildi:",
+                article["title"]
+            )
 
             time.sleep(1)
 
         except Exception as error:
-            print("Telegram gönderim hatası:", error)
+            print(
+                "Telegram gönderim hatası:",
+                error
+            )
 
     seen = seen[-3000:]
 
