@@ -2,163 +2,123 @@
 import os
 import re
 import json
-import base64
 import html
+import time
+import base64
 import unicodedata
-import requests
-import feedparser
-
-from datetime import datetime, timezone
-from bs4 import BeautifulSoup
 from urllib.parse import quote
 
+import requests
+import feedparser
+from bs4 import BeautifulSoup
 
-# ==========================================
-# AYARLAR
-# ==========================================
 
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+# =========================
+# RATEBROS AYARLARI
+# =========================
+
+PLAYER_FILE = "players.json"
+MAX_NEWS_PER_RUN = 10
+MAX_SEEN_LINKS = 3000
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPOSITORY = os.getenv("GITHUB_REPOSITORY")
-GITHUB_BRANCH = os.getenv("GITHUB_REF_NAME", "main")
+GITHUB_REF_NAME = os.getenv("GITHUB_REF_NAME", "main")
 
 SEEN_FILE = "seen.json"
-PLAYER_FILE = "players.json"
 
-MAX_NEWS_PER_RUN = 10
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 Chrome/120 Safari/537.36"
-}
-
-SOURCES = {
+RSS_SOURCES = {
     "Marca": "https://e00-marca.uecdn.es/rss/futbol/mercado-fichajes.xml",
     "CaughtOffside": "https://www.caughtoffside.com/feed/",
     "Sky Sports": "https://www.skysports.com/rss/11095",
     "Football Italia": "https://www.football-italia.net/feed/",
-    "Get Football News Germany": "https://www.getfootballnewsgermany.com/feed/"
+    "Get Football News Germany": "https://www.getfootballnewsgermany.com/feed/",
 }
 
-CLUBS = {
-    "Real Madrid": ["Real Madrid", "Real Madrid CF"],
-    "Barcelona": ["Barcelona", "FC Barcelona"],
-    "Atletico Madrid": ["Atletico Madrid", "Atlético Madrid"],
-    "Arsenal": ["Arsenal"],
-    "Manchester City": ["Manchester City", "Man City"],
-    "Manchester United": ["Manchester United", "Man United", "Man Utd"],
-    "Liverpool": ["Liverpool"],
-    "Chelsea": ["Chelsea"],
-    "Tottenham": ["Tottenham", "Spurs"],
-    "Newcastle": ["Newcastle United"],
-    "Bayern Munich": ["Bayern Munich", "Bayern"],
-    "Borussia Dortmund": ["Borussia Dortmund", "Dortmund"],
-    "Bayer Leverkusen": ["Bayer Leverkusen", "Leverkusen"],
-    "RB Leipzig": ["RB Leipzig"],
-    "PSG": ["Paris Saint-Germain", "Paris Saint Germain", "PSG"],
-    "Inter": ["Inter Milan", "Inter"],
-    "AC Milan": ["AC Milan", "Milan"],
-    "Juventus": ["Juventus", "Juve"],
-    "Napoli": ["Napoli"],
-    "Roma": ["AS Roma", "Roma"],
-    "Beşiktaş": ["Besiktas", "Beşiktaş"],
-    "Galatasaray": ["Galatasaray"],
-    "Fenerbahçe": ["Fenerbahce", "Fenerbahçe"],
-    "Trabzonspor": ["Trabzonspor"],
-    "Ajax": ["Ajax"],
-    "Benfica": ["Benfica"],
-    "Porto": ["FC Porto", "Porto"],
-    "Sporting": ["Sporting CP", "Sporting Lisbon"],
-    "Al Nassr": ["Al Nassr"],
-    "Al Hilal": ["Al Hilal"],
-    "Al Ittihad": ["Al Ittihad"],
-    "Al Ahli": ["Al Ahli"]
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 RATEBROS Football News Bot"
 }
+
+CLUBS = [
+    "Real Madrid", "Barcelona", "Atletico Madrid",
+    "Arsenal", "Manchester City", "Manchester United",
+    "Liverpool", "Chelsea", "Tottenham", "Newcastle",
+    "Bayern Munich", "Borussia Dortmund", "Bayer Leverkusen",
+    "RB Leipzig", "Paris Saint-Germain", "PSG",
+    "Inter Milan", "Inter", "AC Milan", "Juventus",
+    "Napoli", "Roma", "Beşiktaş", "Besiktas",
+    "Galatasaray", "Fenerbahçe", "Fenerbahce",
+    "Trabzonspor", "Ajax", "Benfica", "Porto",
+    "Sporting CP", "Al Nassr", "Al Hilal",
+    "Al Ittihad", "Al Ahli", "Getafe", "Udinese",
+    "Wolfsburg", "Southampton",
+]
 
 TRANSFER_WORDS = [
-    "transfer", "signing", "signed for", "signs for",
-    "deal", "bid", "offer", "loan", "departure",
-    "exit", "target", "interest", "interested",
-    "talks", "negotiations", "agreement",
-    "release clause", "move to", "join", "joining",
-    "set to leave", "wants to leave", "could leave",
-    "will leave", "loan deal", "buy option",
-    "option to buy", "purchase option", "recall",
-    "renewal", "extends contract", "contract extension",
-    "wechsel", "verpflichten", "leihe", "vertrag",
+    # İngilizce
+    "transfer", "transfers", "sign", "signing", "signed",
+    "signs", "join", "joins", "joined", "move", "moves",
+    "moving", "deal", "agreement", "agreed", "bid",
+    "offer", "interest", "interested", "target",
+    "negotiations", "loan", "permanent", "exit",
+    "departure", "release clause", "contract offer",
+    "contract talks", "set to join", "close to signing",
+
+    # İspanyolca
+    "fichaje", "fichajes", "ficha", "fichar",
+    "acuerdo", "oferta", "interes", "interés",
+    "negociaciones", "traspaso", "cesion", "cesión",
+    "llegada", "salida", "firmar", "renovacion",
+    "renovación", "mercado",
+
+    # Almanca
+    "wechsel", "wechseln", "verpflichtung",
+    "verpflichtet", "leihe", "ausleihe",
+    "angebot", "interesse", "verhandlungen",
+    "unterschreibt", "verlängert", "transferiert",
+
+    # İtalyanca
     "accordo", "prestito", "ingaggio",
-    "fichar", "cesión", "traspaso", "salida",
-    "salir", "oferta", "enero", "mercato",
-    "mercado", "fichajes"
-]
+    "trattativa", "trattative", "firma",
+    "firmare", "interesse", "offerta",
+    "cessione", "rinnovo", "acquisto",
 
-OFFICIAL_WORDS = [
-    "officially signed", "official transfer",
-    "completed transfer", "completes move",
-    "has signed for", "joins on loan",
-    "signs a contract", "official announcement"
-]
-
-STRONG_WORDS = [
-    "agreement reached", "deal agreed",
-    "medical booked", "medical scheduled",
-    "personal terms agreed", "final stages",
-    "close to signing", "set to sign",
-    "advanced talks", "bid accepted"
-]
-
-RUMOR_WORDS = [
-    "could join", "interested in", "wants to sign",
-    "linked with", "targeting", "considering",
-    "eyeing", "open to", "ready to offer",
-    "reportedly", "according to reports",
-    "being monitored", "interest from"
-]
-
-MANAGER_WORDS = [
-    "manager appointed", "appoints manager",
-    "new head coach", "head coach appointed",
-    "manager sacked", "coach sacked",
-    "manager leaves", "coach leaves",
-    "named manager", "named head coach",
-    "managerial appointment", "coach appointment",
-    "appointing a manager", "appointing a coach",
-    "technical director appointed"
+    # Fransızca
+    "transfert", "accord", "accordo",
+    "prêt", "offre", "intérêt", "rejoint",
 ]
 
 BAD_TITLE_WORDS = [
-    "match report", "starting line-up", "starting lineup",
-    "predicted lineup", "predicted line-up",
-    "live blog", "transfer centre live",
-    "transfer center live", "highlights",
-    "player ratings", "press conference",
-    "post-match", "starting xi"
+    "highlights", "match report", "player ratings",
+    "predicted lineup", "starting lineup",
+    "injury update", "injury news",
+    "reaction", "analysis", "watch",
+    "wonderkid record", "goal of the season",
+]
+
+MANAGER_WORDS = [
+    "manager", "head coach", "coach",
+    "managerial", "managerial role",
+    "sacked", "appointed as manager",
 ]
 
 
-# ==========================================
+# =========================
 # METİN İŞLEME
-# ==========================================
+# =========================
 
 def normalize(text):
-    text = unicodedata.normalize("NFKD", str(text or ""))
+    text = str(text or "").lower()
+    text = unicodedata.normalize("NFKD", text)
     text = "".join(
-        c for c in text if not unicodedata.combining(c)
+        c for c in text
+        if not unicodedata.combining(c)
     )
-    text = text.casefold()
+    text = text.replace("ß", "ss")
     text = re.sub(r"[^a-z0-9]+", " ", text)
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def clean_text(text):
-    if not text:
-        return ""
-
-    soup = BeautifulSoup(str(text), "html.parser")
-    text = soup.get_text(" ", strip=True)
-    text = html.unescape(text)
-
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -169,43 +129,44 @@ def contains_phrase(text, phrase):
     if not phrase:
         return False
 
-    return f" {phrase} " in f" {text} "
+    return bool(
+        re.search(
+            r"(?<![a-z0-9])" + re.escape(phrase) + r"(?![a-z0-9])",
+            text
+        )
+    )
 
 
-def split_sentences(text):
-    return [
-        s.strip()
-        for s in re.split(r"(?<=[.!?])\s+", text or "")
-        if len(s.strip()) > 25
-    ]
+def contains_transfer_word(text):
+    normalized = normalize(text)
+
+    for word in TRANSFER_WORDS:
+        if contains_phrase(normalized, word):
+            return True
+
+    return False
 
 
-# ==========================================
+# =========================
 # OYUNCU VERİTABANI
-# ==========================================
+# =========================
 
 def load_players():
     if not os.path.exists(PLAYER_FILE):
         raise RuntimeError("players.json bulunamadı!")
 
-    with open(PLAYER_FILE, "r", encoding="utf-8") as file:
-        data = json.load(file)
+    with open(PLAYER_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
 
-    # Yeni format: doğrudan liste
     if isinstance(data, list):
         records = data
-
-    # Eski format: {"players": [...]}
     elif isinstance(data, dict):
         records = data.get("players", [])
-
     else:
         records = []
 
-    if not records:
-        raise RuntimeError("Oyuncu veritabanı boş!")
-
     players = []
+    name_index = {}
 
     for item in records:
         if not isinstance(item, dict):
@@ -228,15 +189,13 @@ def load_players():
         if isinstance(aliases, str):
             aliases = [aliases]
 
-        names = [name]
+        names = [name] + [
+            str(alias).strip()
+            for alias in aliases
+            if str(alias).strip()
+        ]
 
-        for alias in aliases:
-            alias = str(alias).strip()
-
-            if alias and alias not in names:
-                names.append(alias)
-
-        players.append({
+        player = {
             "name": name,
             "names": names,
             "club": str(
@@ -247,75 +206,119 @@ def load_players():
             "player_id": item.get("player_id"),
             "position": item.get("position", ""),
             "country": item.get("country", ""),
-            "market_value": item.get("current_market_value")
-        })
+            "market_value": item.get("current_market_value"),
+        }
 
-    if not players:
-        raise RuntimeError("Oyuncular okunamadı!")
+        players.append(player)
 
-    print(f"Oyuncu veritabanı: {len(players):,} oyuncu")
+        for player_name in names:
+            normalized = normalize(player_name)
 
-    return players
-
-
-# ==========================================
-# OYUNCU TESPİTİ
-# ==========================================
-
-def find_title_players(title, players):
-    text = normalize(title)
-    matches = {}
-
-    for player in players:
-        for name in player["names"]:
-            normalized_name = normalize(name)
-
-            if len(normalized_name) < 5:
+            # Tek harfli veya çok kısa isimleri kullanma.
+            if len(normalized.replace(" ", "")) < 5:
                 continue
 
-            if f" {normalized_name} " in f" {text} ":
-                matches[player["name"]] = player
-                break
+            name_index.setdefault(normalized, []).append(player)
 
-    results = list(matches.values())
+    print(f"Oyuncu veritabanı: {len(players):,} oyuncu")
+    print(f"İsim eşleşmeleri: {len(name_index):,}")
 
-    filtered = []
-
-    for player in results:
-        player_name = normalize(player["name"])
-
-        is_part_of_longer = any(
-            player_name != normalize(other["name"])
-            and f" {player_name} " in
-            f" {normalize(other['name'])} "
-            for other in results
-        )
-
-        if not is_part_of_longer:
-            filtered.append(player)
-
-    return filtered
+    return players, name_index
 
 
-# ==========================================
-# KULÜP TESPİTİ
-# ==========================================
+def find_title_players(text, name_index):
+    normalized = normalize(text)
+    found = {}
+
+    # İsimleri uzun olandan kısa olana doğru kontrol et.
+    for player_name in sorted(
+        name_index.keys(),
+        key=len,
+        reverse=True
+    ):
+        if not contains_phrase(normalized, player_name):
+            continue
+
+        for player in name_index[player_name]:
+            key = str(
+                player.get("player_id")
+                or player["name"]
+            )
+            found[key] = player
+
+    return list(found.values())
+
+
+# =========================
+# KULÜP KONTROLÜ
+# =========================
 
 def find_clubs(text):
     found = []
 
-    for club, aliases in CLUBS.items():
-        for alias in aliases:
-            if contains_phrase(text, alias):
+    for club in CLUBS:
+        if contains_phrase(text, club):
+            if club not in found:
                 found.append(club)
-                break
 
-    return list(dict.fromkeys(found))
+    return found
 
 
-# ==========================================
-# HABER SAYFASI
-# ==========================================
+# =========================
+# RSS HABERLERİ
+# =========================
+
+def get_feed_entries():
+    all_entries = []
+    seen_links = set()
+
+    for source_name, url in RSS_SOURCES.items():
+        print(f"\nKaynak kontrol ediliyor: {source_name}")
+
+        try:
+            response = requests.get(
+                url,
+                headers=HEADERS,
+                timeout=20
+            )
+            response.raise_for_status()
+
+            feed = feedparser.parse(response.content)
+
+            for entry in feed.entries:
+                link = str(
+                    getattr(entry, "link", "")
+                ).strip()
+
+                if not link or link in seen_links:
+                    continue
+
+                seen_links.add(link)
+
+                all_entries.append({
+                    "source": source_name,
+                    "title": str(
+                        getattr(entry, "title", "")
+                    ).strip(),
+                    "summary": str(
+                        getattr(entry, "summary", "")
+                    ).strip(),
+                    "link": link,
+                })
+
+            print(
+                f"Bulunan haber: {len(feed.entries)}"
+            )
+
+        except Exception as e:
+            print(f"Kaynak hatası: {e}")
+
+    return all_entries
+
+
+# =========================
+# HABER SAYFASINI OKU
+# =========================
 
 def read_article(url):
     try:
@@ -324,480 +327,481 @@ def read_article(url):
             headers=HEADERS,
             timeout=15
         )
-
         response.raise_for_status()
 
-        soup = BeautifulSoup(response.text, "html.parser")
+        soup = BeautifulSoup(
+            response.text,
+            "html.parser"
+        )
 
-        for element in soup.select(
-            "script, style, nav, footer, header, aside, "
-            "iframe, form, .advertisement, .advert, "
-            ".social-share, .related-articles"
-        ):
+        for element in soup([
+            "script", "style", "nav",
+            "footer", "header", "aside"
+        ]):
             element.decompose()
 
-        selectors = [
-            '[itemprop="articleBody"]',
-            "article",
-            ".article-body",
-            ".article-content",
-            ".entry-content",
-            ".post-content",
-            ".story-body",
-            ".content-body",
-            "main"
-        ]
+        article = soup.find("article")
 
-        for selector in selectors:
-            container = soup.select_one(selector)
+        if article:
+            text = article.get_text(" ", strip=True)
+        else:
+            text = soup.get_text(" ", strip=True)
 
-            if not container:
-                continue
+        return re.sub(r"\s+", " ", text)[:12000]
 
-            paragraphs = [
-                clean_text(p.get_text(" ", strip=True))
-                for p in container.find_all("p")
-            ]
-
-            paragraphs = [
-                p for p in paragraphs if len(p) > 45
-            ]
-
-            text = " ".join(paragraphs)
-
-            if len(text) > 250:
-                return text[:9000]
-
-        paragraphs = [
-            clean_text(p.get_text(" ", strip=True))
-            for p in soup.find_all("p")
-        ]
-
-        paragraphs = [
-            p for p in paragraphs if len(p) > 45
-        ]
-
-        return " ".join(paragraphs)[:9000]
-
-    except Exception as error:
-        print("Haber sayfası okunamadı:", error)
+    except Exception as e:
+        print(f"Sayfa okunamadı: {e}")
         return ""
 
 
-# ==========================================
-# TRANSFER DOĞRULAMA
-# ==========================================
+# =========================
+# HABER DOĞRULAMA
+# =========================
 
-def has_transfer_words(text):
-    return any(
-        contains_phrase(text, word)
-        for word in TRANSFER_WORDS
-    )
+def validate_article(article, name_index):
+    title = article["title"]
+    summary = article["summary"]
+    source = article["source"]
 
+    title_normalized = normalize(title)
+    summary_normalized = normalize(summary)
 
-def is_manager_news(text):
-    return any(
-        contains_phrase(text, word)
-        for word in MANAGER_WORDS
-    )
-
-
-def validate_article(title, summary, body, players):
+    combined = f"{title} {summary}"
 
     if any(
-        contains_phrase(title, word)
+        contains_phrase(title_normalized, word)
         for word in BAD_TITLE_WORDS
     ):
         return None
 
-    if is_manager_news(title):
+    title_players = find_title_players(
+        title,
+        name_index
+    )
+
+    if not title_players:
+        print("Reddedildi: Başlıkta oyuncu bulunamadı.")
         return None
 
-    title_players = find_title_players(title, players)
+    # Başlıkta oyuncu var ama transfer işareti yoksa
+    # haber metnini de kontrol et.
+    transfer_found = contains_transfer_word(combined)
 
-    if len(title_players) != 1:
-        print("Reddedildi: Başlıkta tek oyuncu bulunamadı.")
-        return None
+    body = ""
 
-    player = title_players[0]
+    if not transfer_found or len(title_players) > 1:
+        body = read_article(article["link"])
 
-    full_text = f"{title}. {summary}. {body}"
-    sentences = split_sentences(full_text)
+    full_text = f"{title} {summary} {body}"
 
-    player_sentences = []
-
-    for index, sentence in enumerate(sentences):
-        if any(
-            contains_phrase(sentence, name)
-            for name in player["names"]
-        ):
-            player_sentences.append(index)
-
-    if not player_sentences:
-        print("Reddedildi: Oyuncu haber gövdesinde yok.")
-        return None
-
-    relevant_indices = set()
-
-    for index in player_sentences:
-        for nearby in (index - 1, index, index + 1):
-            if 0 <= nearby < len(sentences):
-                relevant_indices.add(nearby)
-
-    relevant_sentences = [
-        sentences[i] for i in sorted(relevant_indices)
-    ]
-
-    evidence_text = " ".join(relevant_sentences)
-
-    if not has_transfer_words(evidence_text):
+    if not contains_transfer_word(full_text):
         print("Reddedildi: Transfer ifadesi bulunamadı.")
         return None
 
-    if is_manager_news(evidence_text):
+    # Teknik direktör haberlerini ele.
+    title_has_manager = any(
+        contains_phrase(title_normalized, word)
+        for word in MANAGER_WORDS
+    )
+
+    if title_has_manager and not any(
+        contains_phrase(title_normalized, word)
+        for word in [
+            "player", "sign", "transfer",
+            "join", "fichaje", "wechsel"
+        ]
+    ):
+        print("Reddedildi: Teknik direktör haberi.")
         return None
 
-    clubs = find_clubs(f"{title}. {evidence_text}")
+    clubs = find_clubs(full_text)
 
     if not clubs:
         print("Reddedildi: Takip edilen kulüp bulunamadı.")
         return None
 
+    # Birden fazla oyuncu varsa metinde transfer
+    # ifadesiyle bağlantısı daha güçlü olanı seç.
+    selected_player = None
+
+    if len(title_players) == 1:
+        selected_player = title_players[0]
+    else:
+        body_normalized = normalize(body or summary)
+
+        scored = []
+
+        for player in title_players:
+            score = 0
+
+            for name in player["names"]:
+                normalized_name = normalize(name)
+
+                if contains_phrase(body_normalized, normalized_name):
+                    score += 2
+
+                if contains_phrase(title_normalized, normalized_name):
+                    score += 1
+
+            player_club = normalize(player.get("club", ""))
+
+            if player_club and player_club in normalize(full_text):
+                score += 1
+
+            scored.append((score, player))
+
+        scored.sort(
+            key=lambda item: item[0],
+            reverse=True
+        )
+
+        if len(scored) > 1 and scored[0][0] == scored[1][0]:
+            print("Reddedildi: Birden fazla oyuncu eşit derecede olası.")
+            return None
+
+        selected_player = scored[0][1]
+
+    if not selected_player:
+        return None
+
     return {
-        "player": player,
+        "player": selected_player,
         "clubs": clubs,
-        "sentences": relevant_sentences,
-        "evidence": evidence_text
+        "body": body,
+        "source": source,
     }
 
 
-# ==========================================
-# SINIFLANDIRMA
-# ==========================================
+# =========================
+# ÜCRET BULMA
+# =========================
 
-def classify(evidence):
-    text = normalize(evidence)
-
-    if any(
-        contains_phrase(text, word)
-        for word in OFFICIAL_WORDS
-    ):
-        return "⚽ RESMÎ TRANSFER"
-
-    if any(
-        contains_phrase(text, word)
-        for word in STRONG_WORDS
-    ):
-        return "🔥 GÜÇLÜ TRANSFER İDDİASI"
-
-    if any(
-        contains_phrase(text, word)
-        for word in RUMOR_WORDS
-    ):
-        return "🟠 TRANSFER SÖYLENTİSİ"
-
-    return "⚽ TRANSFER GELİŞMESİ"
-
-
-# ==========================================
-# BONSERVİS
-# ==========================================
-
-def extract_fee(evidence):
+def extract_fee(text):
     patterns = [
-        r"(?:€|£)\s?\d+(?:[.,]\d+)?\s?(?:million|m|billion|bn)",
-        r"\d+(?:[.,]\d+)?\s?(?:million|m|billion|bn)\s?(?:euros|pounds)",
-        r"(?:€|£)\s?\d{1,3}(?:[.,]\d{3})+"
+        r"€\s?\d+(?:[.,]\d+)?\s?(?:m|million|bn|billion)?",
+        r"£\s?\d+(?:[.,]\d+)?\s?(?:m|million|bn|billion)?",
+        r"\$\s?\d+(?:[.,]\d+)?\s?(?:m|million|bn|billion)?",
+        r"\d+(?:[.,]\d+)?\s?(?:million|m|billion|bn)\s?(?:euros|euro|pounds)?",
     ]
 
     for pattern in patterns:
         match = re.search(
-            pattern, evidence, re.IGNORECASE
+            pattern,
+            text,
+            flags=re.IGNORECASE
         )
 
         if match:
             return match.group(0)
 
-    return "Açıklanmadı"
+    return None
 
 
-# ==========================================
+# =========================
 # TÜRKÇE ÇEVİRİ
-# ==========================================
+# =========================
 
-def translate_to_turkish(text):
+def translate_text(text):
     if not text:
         return ""
 
     try:
+        url = (
+            "https://translate.googleapis.com/translate_a/single"
+            "?client=gtx&sl=auto&tl=tr&dt=t&q="
+            + quote(text[:3000])
+        )
+
         response = requests.get(
-            "https://translate.googleapis.com/translate_a/single",
-            params={
-                "client": "gtx",
-                "sl": "auto",
-                "tl": "tr",
-                "dt": "t",
-                "q": text[:4500]
-            },
-            timeout=20
+            url,
+            headers=HEADERS,
+            timeout=12
         )
 
         response.raise_for_status()
         data = response.json()
 
-        return "".join(
-            part[0] for part in data[0] if part[0]
-        ).strip()
+        translated = "".join(
+            part[0]
+            for part in data[0]
+            if part and part[0]
+        )
 
-    except Exception as error:
-        print("Çeviri hatası:", error)
+        return translated.strip() or text
+
+    except Exception:
         return text
 
 
-def make_summary(sentences):
-    text = " ".join(sentences[:3])
-    translated = translate_to_turkish(text)
+# =========================
+# TELEGRAM MESAJI
+# =========================
 
-    if len(translated) > 900:
-        translated = translated[:900].rsplit(" ", 1)[0] + "..."
+def build_message(article, verification):
+    player = verification["player"]
+    title = article["title"]
+    summary = article["summary"]
+    body = verification["body"]
 
-    return translated or "Özet oluşturulamadı."
+    translated_title = translate_text(title)
 
+    source_text = summary or body[:700]
 
-# ==========================================
-# GITHUB KAYIT SİSTEMİ
-# ==========================================
-
-def github_headers():
-    return {
-        "Authorization": f"Bearer {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github+json"
-    }
-
-
-def load_seen():
-    if not GITHUB_TOKEN or not GITHUB_REPOSITORY:
-        raise RuntimeError("GitHub kayıt ayarları bulunamadı.")
-
-    url = (
-        f"https://api.github.com/repos/{GITHUB_REPOSITORY}"
-        f"/contents/{SEEN_FILE}?ref={quote(GITHUB_BRANCH)}"
+    translated_summary = translate_text(
+        source_text[:2500]
     )
 
-    response = requests.get(
-        url,
-        headers=github_headers(),
-        timeout=20
+    fee = extract_fee(
+        f"{title} {summary} {body}"
     )
 
-    if response.status_code == 404:
-        return set(), None
+    player_name = html.escape(player["name"])
+    safe_title = html.escape(translated_title)
+    safe_summary = html.escape(translated_summary)
+    safe_source = html.escape(article["source"])
+    safe_link = html.escape(article["link"], quote=True)
 
-    response.raise_for_status()
-
-    data = response.json()
-
-    content = base64.b64decode(
-        data["content"]
-    ).decode("utf-8")
-
-    return set(json.loads(content)), data["sha"]
-
-
-def save_seen(seen, sha):
-    url = (
-        f"https://api.github.com/repos/{GITHUB_REPOSITORY}"
-        f"/contents/{SEEN_FILE}"
+    message = (
+        "⚽ <b>RATEBROS | TRANSFER HABERİ</b>\n\n"
+        f"👤 <b>Oyuncu:</b> {player_name}\n"
+        f"🏟 <b>İlgili kulüp:</b> "
+        f"{html.escape(', '.join(verification['clubs']))}\n\n"
+        f"📰 <b>{safe_title}</b>\n\n"
+        f"{safe_summary[:1800]}\n\n"
     )
 
-    content = json.dumps(
-        list(seen)[-3000:],
-        ensure_ascii=False,
-        indent=2
+    if fee:
+        message += (
+            f"💰 <b>Haberde geçen ücret:</b> "
+            f"{html.escape(fee)}\n"
+        )
+
+    message += (
+        f"\n🌐 <b>Kaynak:</b> {safe_source}\n"
+        f'🔗 <a href="{safe_link}">Haberi oku</a>'
     )
 
-    encoded = base64.b64encode(
-        content.encode("utf-8")
-    ).decode("utf-8")
+    return message[:3900]
 
-    payload = {
-        "message": "RATEBROS haber kayıtlarını güncelle",
-        "content": encoded,
-        "branch": GITHUB_BRANCH
-    }
-
-    if sha:
-        payload["sha"] = sha
-
-    response = requests.put(
-        url,
-        headers=github_headers(),
-        json=payload,
-        timeout=20
-    )
-
-    response.raise_for_status()
-
-    print("seen.json güncellendi.")
-
-
-# ==========================================
-# TELEGRAM
-# ==========================================
 
 def send_telegram(message):
-    if not BOT_TOKEN or not CHAT_ID:
-        raise RuntimeError("Telegram ayarları eksik!")
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        raise RuntimeError(
+            "Telegram secret bilgileri eksik!"
+        )
+
+    url = (
+        f"https://api.telegram.org/bot"
+        f"{TELEGRAM_BOT_TOKEN}/sendMessage"
+    )
 
     response = requests.post(
-        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-        data={
-            "chat_id": CHAT_ID,
+        url,
+        json={
+            "chat_id": TELEGRAM_CHAT_ID,
             "text": message,
-            "disable_web_page_preview": True
+            "parse_mode": "HTML",
+            "disable_web_page_preview": False,
         },
         timeout=20
     )
 
-    response.raise_for_status()
+    if not response.ok:
+        print("Telegram hatası:", response.text)
+        response.raise_for_status()
 
-    result = response.json()
-
-    if not result.get("ok"):
-        raise RuntimeError(
-            f"Telegram hatası: {result}"
-        )
+    return True
 
 
-# ==========================================
-# MESAJ OLUŞTURMA
-# ==========================================
+# =========================
+# GITHUB SEEN.JSON
+# =========================
 
-def make_message(article, validation):
-    player = validation["player"]["name"]
-    clubs = ", ".join(validation["clubs"])
-
-    evidence = validation["evidence"]
-
-    status = classify(evidence)
-    fee = extract_fee(evidence)
-
-    translated_title = translate_to_turkish(
-        article["title"]
-    )
-
-    summary = make_summary(
-        validation["sentences"]
-    )
+def github_api_url():
+    if not GITHUB_REPOSITORY:
+        return None
 
     return (
-        f"{status}\n\n"
-        f"👤 Oyuncu: {player}\n"
-        f"🏟️ İlgili kulüp: {clubs}\n"
-        f"💰 Bonservis: {fee}\n\n"
-        f"📰 Kaynak: {article['source']}\n"
-        f"📌 {translated_title}\n\n"
-        f"📝 {summary}\n\n"
-        f"🔗 Kaynak:\n{article['link']}"
-    )[:4000]
+        "https://api.github.com/repos/"
+        f"{GITHUB_REPOSITORY}/contents/{SEEN_FILE}"
+    )
 
 
-# ==========================================
+def github_headers():
+    headers = {
+        "Accept": "application/vnd.github+json"
+    }
+
+    if GITHUB_TOKEN:
+        headers["Authorization"] = (
+            f"Bearer {GITHUB_TOKEN}"
+        )
+
+    return headers
+
+
+def load_seen():
+    local_seen = []
+
+    if os.path.exists(SEEN_FILE):
+        try:
+            with open(SEEN_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            if isinstance(data, list):
+                local_seen = data
+
+        except Exception:
+            pass
+
+    api_url = github_api_url()
+
+    if not api_url or not GITHUB_TOKEN:
+        return set(local_seen)
+
+    try:
+        response = requests.get(
+            api_url,
+            headers=github_headers(),
+            timeout=15
+        )
+
+        if response.status_code == 200:
+            content = response.json()
+
+            decoded = base64.b64decode(
+                content["content"]
+            ).decode("utf-8")
+
+            data = json.loads(decoded)
+
+            if isinstance(data, list):
+                local_seen.extend(data)
+
+    except Exception as e:
+        print("GitHub seen.json okunamadı:", e)
+
+    return set(local_seen)
+
+
+def save_seen(seen):
+    data = list(seen)[-MAX_SEEN_LINKS:]
+
+    with open(SEEN_FILE, "w", encoding="utf-8") as f:
+        json.dump(
+            data,
+            f,
+            ensure_ascii=False,
+            indent=2
+        )
+
+    api_url = github_api_url()
+
+    if not api_url or not GITHUB_TOKEN:
+        return
+
+    try:
+        response = requests.get(
+            api_url,
+            headers=github_headers(),
+            timeout=15
+        )
+
+        sha = None
+
+        if response.status_code == 200:
+            sha = response.json().get("sha")
+
+        content = base64.b64encode(
+            json.dumps(
+                data,
+                ensure_ascii=False,
+                indent=2
+            ).encode("utf-8")
+        ).decode("utf-8")
+
+        payload = {
+            "message": "Update RATEBROS seen links",
+            "content": content,
+            "branch": GITHUB_REF_NAME,
+        }
+
+        if sha:
+            payload["sha"] = sha
+
+        result = requests.put(
+            api_url,
+            headers=github_headers(),
+            json=payload,
+            timeout=20
+        )
+
+        if not result.ok:
+            print("GitHub kayıt hatası:", result.text)
+        else:
+            print("seen.json GitHub'a kaydedildi.")
+
+    except Exception as e:
+        print("GitHub seen.json kaydedilemedi:", e)
+
+
+# =========================
 # ANA PROGRAM
-# ==========================================
+# =========================
 
 def main():
-    print("================================")
-    print("RATEBROS - DOĞRULAMALI HABER SİSTEMİ")
-    print("================================")
+    print("\n============================")
+    print("      RATEBROS BAŞLIYOR")
+    print("============================\n")
 
-    if not BOT_TOKEN or not CHAT_ID:
-        raise RuntimeError("Telegram ayarları eksik!")
+    players, name_index = load_players()
 
-    players = load_players()
-    seen, seen_sha = load_seen()
+    seen = load_seen()
 
-    new_articles = []
+    print(f"Önceden görülen haber: {len(seen)}")
 
-    for source, feed_url in SOURCES.items():
+    entries = get_feed_entries()
 
-        print(f"\n{source} kontrol ediliyor...")
+    print(f"\nToplam benzersiz RSS haberi: {len(entries)}")
 
-        try:
-            feed = feedparser.parse(feed_url)
+    verified = []
 
-            if feed.bozo and not feed.entries:
-                print("RSS okunamadı:", source)
-                continue
+    for article in entries:
+        link = article["link"]
 
-            for entry in feed.entries:
+        if link in seen:
+            continue
 
-                title = clean_text(entry.get("title", ""))
-                link = entry.get("link", "")
+        print(f"\nKontrol: {article['title']}")
 
-                if not title or not link or link in seen:
-                    continue
+        result = validate_article(
+            article,
+            name_index
+        )
 
-                rss_summary = clean_text(
-                    entry.get("summary", "")
-                )
+        if result:
+            print(
+                "DOĞRULANDI:",
+                result["player"]["name"]
+            )
 
-                if not rss_summary and entry.get("content"):
-                    rss_summary = clean_text(
-                        entry["content"][0].get("value", "")
-                    )
+            verified.append(
+                (article, result)
+            )
 
-                print("Kontrol:", title)
-
-                body = read_article(link)
-
-                if not body:
-                    print("Reddedildi: Haber gövdesi okunamadı.")
-                    continue
-
-                validation = validate_article(
-                    title,
-                    rss_summary,
-                    body,
-                    players
-                )
-
-                if not validation:
-                    print("Haber reddedildi.")
-                    continue
-
-                new_articles.append({
-                    "source": source,
-                    "title": title,
-                    "summary": rss_summary,
-                    "body": body,
-                    "link": link,
-                    "validation": validation
-                })
-
-        except Exception as error:
-            print(f"{source} RSS hatası: {error}")
-
-    # Aynı link birden fazla RSS kaynağında varsa tekilleştir.
-    unique_articles = {}
-    for article in new_articles:
-        unique_articles.setdefault(article["link"], article)
-
-    new_articles = list(unique_articles.values())
+        time.sleep(0.2)
 
     print(
-        f"\nDoğrulamayı geçen benzersiz haber: "
-        f"{len(new_articles)}"
+        f"\nDoğrulamayı geçen haber: {len(verified)}"
     )
 
     sent = 0
 
-    for article in new_articles[:MAX_NEWS_PER_RUN]:
-
+    for article, result in verified[:MAX_NEWS_PER_RUN]:
         try:
-            message = make_message(
+            message = build_message(
                 article,
-                article["validation"]
+                result
             )
 
             send_telegram(message)
@@ -805,17 +809,22 @@ def main():
             seen.add(article["link"])
             sent += 1
 
-            print("GÖNDERİLDİ:", article["title"])
+            print(
+                "Telegram'a gönderildi:",
+                article["title"]
+            )
 
-        except Exception as error:
-            print("Gönderme hatası:", error)
+            time.sleep(1)
 
-    save_seen(seen, seen_sha)
+        except Exception as e:
+            print("Gönderim hatası:", e)
 
-    print("================================")
-    print("İŞLEM TAMAMLANDI")
-    print("Gönderilen haber:", sent)
-    print("================================")
+    save_seen(seen)
+
+    print("\n============================")
+    print("       RATEBROS BİTTİ")
+    print("============================")
+    print(f"Gönderilen haber: {sent}")
 
 
 if __name__ == "__main__":
