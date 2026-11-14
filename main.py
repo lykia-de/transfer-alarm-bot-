@@ -5,15 +5,12 @@ import json
 import time
 import base64
 import unicodedata
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from html import escape
 
 import requests
 import feedparser
-from html import escape
-
-# =====================================================
-# RATEBROS
-# =====================================================
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -35,19 +32,18 @@ RSS_SOURCES = {
 
 TRANSFER_WORDS = [
     "transfer", "transfers", "sign", "signing", "signed",
-    "deal", "agreement", "agreed", "bid", "offer",
-    "loan", "join", "joined", "leaves", "departure",
-    "contract", "rejects", "interested", "interest",
-    "fichaje", "fichajes", "ficha", "fichar", "acuerdo",
-    "oferta", "cesion", "salida", "llegada", "mercado",
-    "quiere", "vuelta", "wechsel", "verpflichtet",
-    "leihe", "angebot", "vertrag", "trasferimento",
-    "accordo", "offerta", "cessione", "transfert",
-    "accord", "signe", "ya es del", "close to",
-    "set to join", "set to sign"
+    "deal", "agreement", "agreed", "bid", "offer", "loan",
+    "join", "joined", "leaves", "departure", "contract",
+    "rejects", "interested", "interest", "fichaje",
+    "fichajes", "ficha", "fichar", "acuerdo", "oferta",
+    "cesion", "salida", "llegada", "mercado", "quiere",
+    "vuelta", "wechsel", "verpflichtet", "leihe",
+    "angebot", "vertrag", "trasferimento", "accordo",
+    "offerta", "cessione", "transfert", "accord",
+    "signe", "ya es del", "close to", "set to join",
+    "set to sign", "race to sign"
 ]
 
-# Bu isimler veritabanında olmasa bile kontrol edilir.
 PLAYER_ALIASES = [
     "Joao Felix", "Joao Cancelo", "Joao Neves",
     "Harry Kane", "Dani Carvajal", "Dani Parejo",
@@ -64,13 +60,10 @@ PLAYER_ALIASES = [
     "Alexander Isak", "Viktor Gyokeres", "Marcus Rashford",
     "Mauro Icardi", "Baris Alper Yilmaz", "Orkun Kokcu",
     "Kenan Yildiz", "Hakan Calhanoglu", "Arda Guler",
-    "Ferdi Kadioglu", "Enes Unal",
-    "Antony", "Neymar", "Rodri", "Endrick"
+    "Ferdi Kadioglu", "Enes Unal", "Antony", "Neymar",
+    "Rodri", "Endrick"
 ]
 
-# =====================================================
-# NORMALİZASYON
-# =====================================================
 
 def normalize(value):
     value = str(value or "").lower()
@@ -80,17 +73,11 @@ def normalize(value):
         if not unicodedata.combining(c)
     )
     value = value.replace("ı", "i")
-    value = re.sub(r"[^a-z0-9]+", " ", value)
-    return value.split()
+    return re.findall(r"[a-z0-9]+", value)
 
-
-# =====================================================
-# OYUNCU VERİTABANI
-# =====================================================
 
 def extract_names(data):
     names = set()
-
     fields = (
         "name", "player_name", "full_name",
         "player", "playerName", "fullName"
@@ -100,10 +87,8 @@ def extract_names(data):
         if isinstance(obj, dict):
             for field in fields:
                 value = obj.get(field)
-
                 if isinstance(value, str):
                     value = value.strip()
-
                     if len(value.split()) >= 2 and len(value) >= 5:
                         names.add(value)
 
@@ -127,7 +112,7 @@ def load_players():
             data = json.load(f)
 
         names.update(extract_names(data))
-        print(f"Veritabanından alınan isim: {len(names):,}")
+        print(f"Oyuncu isimleri: {len(names):,}")
 
     except Exception as error:
         print("Oyuncu veritabanı hatası:", error)
@@ -136,11 +121,12 @@ def load_players():
 
 
 # =====================================================
-# HIZLI İSİM İNDEKSİ - TRIE
+# HIZLI İSİM İNDEKSİ
 # =====================================================
 
 def build_player_index(names):
-    root = {}
+    full_name_index = {}
+    surname_candidates = defaultdict(set)
 
     for name in names:
         tokens = normalize(name)
@@ -148,28 +134,39 @@ def build_player_index(names):
         if not tokens:
             continue
 
-        # Tek kelimelik isimleri yalnızca bilinen
-        # alternatif isim listesinden kabul ediyoruz.
-        if len(tokens) == 1 and name not in PLAYER_ALIASES:
-            continue
-
-        node = root
+        # Tam isim indeksi
+        node = full_name_index
 
         for token in tokens:
             node = node.setdefault(token, {})
 
         node.setdefault("_names", []).append(name)
 
-    print("Oyuncu isim indeksi hazır.")
-    return root
+        # Soyadı indeksi
+        if len(tokens) >= 2:
+            surname_candidates[tokens[-1]].add(name)
+
+    # Yalnızca tek oyuncuya ait soyadları otomatik eşleştir.
+    unique_surnames = {
+        surname: next(iter(candidates))
+        for surname, candidates in surname_candidates.items()
+        if len(candidates) == 1
+    }
+
+    print("Tam isim indeksi hazır.")
+    print("Benzersiz soyadı sayısı:", len(unique_surnames))
+
+    return full_name_index, unique_surnames
 
 
-def find_players(title, index):
+def find_players(title, indexes):
+    full_index, surname_index = indexes
     words = normalize(title)
     found = []
 
+    # Önce tam isimleri bul.
     for start in range(len(words)):
-        node = index
+        node = full_index
 
         for position in range(start, len(words)):
             word = words[position]
@@ -183,52 +180,56 @@ def find_players(title, index):
                 if name not in found:
                     found.append(name)
 
+    # Sonra benzersiz soyadlarını kontrol et.
+    for word in words:
+        name = surname_index.get(word)
+
+        if name and name not in found:
+            found.append(name)
+
     return found
 
 
 # =====================================================
-# TRANSFER HABERİ KONTROLÜ
+# HABER FİLTRELEME
 # =====================================================
 
 def is_transfer_news(title):
-    words = normalize(title)
-    normalized = " ".join(words)
+    normalized = " ".join(normalize(title))
 
-    for term in TRANSFER_WORDS:
-        if term in normalized:
-            return True
-
-    return False
+    return any(
+        " ".join(normalize(term)) in normalized
+        for term in TRANSFER_WORDS
+    )
 
 
 def classify_news(title):
-    """
-    RSS haberleri tek başına resmî doğrulama sayılmaz.
-    Bu nedenle bot hiçbir haberi otomatik RESMÎ yapmaz.
-    """
-
-    strong_words = [
+    # RSS başlığı tek başına resmî doğrulama değildir.
+    strong_phrases = [
         "agreement reached",
         "deal agreed",
-        "signed",
-        "signs for",
-        "joins",
         "completes move",
         "principio de acuerdo",
         "acuerdo cerrado",
-        "ficha por"
+        "ficha por",
+        "signed for",
+        "signs for",
+        "joins"
     ]
 
     normalized = " ".join(normalize(title))
 
-    if any(word in normalized for word in strong_words):
+    if any(
+        " ".join(normalize(phrase)) in normalized
+        for phrase in strong_phrases
+    ):
         return "🟡 TRANSFER İDDİASI"
 
     return "⚪ TRANSFER SÖYLENTİSİ"
 
 
 # =====================================================
-# RSS KAYNAKLARI
+# RSS
 # =====================================================
 
 def fetch_feed(source, url):
@@ -261,7 +262,7 @@ def fetch_feed(source, url):
         return articles
 
     except Exception as error:
-        print(f"{source} hatası: {error}")
+        print(f"{source} hatası:", error)
         return []
 
 
@@ -285,7 +286,7 @@ def get_all_news():
     for article in results:
         unique[article["id"]] = article
 
-    print("Benzersiz haber sayısı:", len(unique))
+    print("Benzersiz haber:", len(unique))
     return list(unique.values())
 
 
@@ -326,6 +327,7 @@ def load_seen():
                 content = response.json()["content"]
                 decoded = base64.b64decode(content).decode("utf-8")
                 data = json.loads(decoded)
+
                 print("Önceden görülen haber:", len(data))
                 return set(data)
 
@@ -408,12 +410,12 @@ def send_telegram(article, players):
     player_text = ", ".join(players)
 
     message = (
-        f"🚨 <b>RATEBROS TRANSFER ALARMI</b>\n\n"
+        "🚨 <b>RATEBROS TRANSFER ALARMI</b>\n\n"
         f"<b>{status}</b>\n\n"
         f"⚽ <b>Oyuncu:</b> {escape(player_text)}\n"
         f"📰 <b>Haber:</b> {escape(article['title'])}\n"
         f"🌍 <b>Kaynak:</b> {escape(article['source'])}\n\n"
-        f"⚠️ Transfer resmî olarak doğrulanmadı.\n\n"
+        "⚠️ Transfer resmî olarak doğrulanmadı.\n\n"
         f'<a href="{escape(article["link"], quote=True)}">Haberi Oku</a>'
     )
 
@@ -456,27 +458,24 @@ def main():
         print("Telegram ayarları eksik!")
         return
 
-    # Veritabanı yalnızca bir kere okunur.
     players = load_players()
+    indexes = build_player_index(players)
 
-    # İsim indeksi yalnızca bir kere oluşturulur.
-    player_index = build_player_index(players)
-
-    # Örnek isim testleri
     print("\nİSİM TESTLERİ")
 
-    for test in [
-        "Joao Felix",
-        "Harry Kane",
-        "Dani Carvajal",
-        "Dani Parejo",
-        "Erling Haaland",
-        "David Alaba"
-    ]:
-        print(test, "=>", find_players(test, player_index))
+    test_titles = [
+        "Principio de acuerdo Bayern-Kane",
+        "Carvajal ya es del Getafe",
+        "Alaba ficha por Udinese",
+        "Haaland transfer news",
+        "Fernandes rejects contract offer",
+        "Joao Felix to Al Nassr"
+    ]
+
+    for title in test_titles:
+        print(title, "=>", find_players(title, indexes))
 
     print("\nRSS kontrol ediliyor...")
-
     articles = get_all_news()
     seen = load_seen()
 
@@ -493,13 +492,15 @@ def main():
         if not is_transfer_news(title):
             continue
 
-        matched = find_players(title, player_index)
+        matched = find_players(title, indexes)
 
         if not matched:
             print("Oyuncu bulunamadı:", title)
             continue
 
         print("ONAYLANDI:", title)
+        print("Oyuncular:", matched)
+
         approved.append((article, matched))
 
     print("\nOnaylanan haber:", len(approved))
@@ -510,6 +511,7 @@ def main():
         if send_telegram(article, matched):
             seen.add(article["id"])
             sent += 1
+
         time.sleep(1)
 
     save_seen(seen)
