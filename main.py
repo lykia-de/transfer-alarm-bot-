@@ -25,7 +25,7 @@ HEADERS = {
 }
 
 # ==========================================
-# HABER KAYNAKLARI
+# RSS KAYNAKLARI
 # ==========================================
 
 SOURCES = {
@@ -37,49 +37,60 @@ SOURCES = {
 }
 
 # ==========================================
-# TRANSFER FİLTRELERİ
+# FİLTRELER
 # ==========================================
 
 BAD_WORDS = re.compile(
     r"transfer window guide|transfer roundup|transfer round-up|"
-    r"all the latest transfers|transfer gossip column|"
     r"weekly transfer|transfer tracker|"
     r"fixtures|live scores|match report|"
     r"predicted lineup|team news|"
-    r"quiz|highlights|watch live|"
-    r"transfer rehberi|transfer değerlendirmesi|"
-    r"transfer dosyası|haftanın transfer",
+    r"quiz|crossword|podcast",
     re.IGNORECASE
 )
 
-TRANSFER_WORDS = re.compile(
+TRANSFER_SIGNAL = re.compile(
     r"\b(?:"
-    r"transfer|transfers|transferred|"
-    r"transfer target|transfer talks|"
-    r"transfer fee|transfer bid|"
-    r"signing|signed for|signs for|"
-    r"loan deal|loan move|"
-    r"loan signing|"
-    r"bid for|offer for|"
-    r"deal agreed|agreement reached|"
-    r"agreed terms|personal terms|"
-    r"contract extension|new contract|"
-    r"contract talks|"
-    r"set to join|close to joining|"
+    r"transfers?|transferred|"
+    r"fichajes?|fichaje|traspasos?|"
+    r"mercato|wechsel|leihe|"
+    r"signing|signed|signs|"
+    r"joins|joined|"
+    r"loan|bid|offer|"
+    r"contract|negotiations|"
+    r"talks|interested|interest|"
+    r"transfer target|"
+    r"linked with|"
+    r"agrees|agreement|"
+    r"deal agreed|"
+    r"set to join|"
     r"move for|"
-    r"interested in signing|"
-    r"negotiations with|"
-    r"medical ahead of|"
-    r"fichaje|traspaso|"
-    r"wechsel|leihe|"
-    r"kiralık|kiralik|"
-    r"imza|transferi|"
-    r"teklif|sözleşme|sozlesme|"
+    r"imza|kiralık|kiralik|"
     r"anlaştı|anlasti|"
-    r"görüşmeler|gorusmeler|"
+    r"teklif|sözleşme|sozlesme|"
+    r"görüşme|gorusme|"
+    r"ilgileniyor|"
     r"imzaladı|imzaladi|"
-    r"resmen transfer|"
-    r"transfer görüşmesi|transfer gorusmesi"
+    r"resmen transfer"
+    r")\b",
+    re.IGNORECASE
+)
+
+STRONG_SUMMARY_SIGNAL = re.compile(
+    r"\b(?:"
+    r"transfer|fichaje|traspaso|mercato|wechsel|"
+    r"transfer talks|transfer target|"
+    r"loan move|loan deal|"
+    r"bid for|offer for|"
+    r"contract extension|"
+    r"personal terms|"
+    r"medical ahead of|"
+    r"deal agreed|"
+    r"negotiations with|"
+    r"imza|kiralık|kiralik|"
+    r"transferi|teklif|"
+    r"görüşmeler|gorusmeler|"
+    r"anlaşma|anlasma"
     r")\b",
     re.IGNORECASE
 )
@@ -89,7 +100,6 @@ OFFICIAL_WORDS = re.compile(
     r"official|confirmed|announced|"
     r"completes the signing|"
     r"has signed for|"
-    r"joins officially|"
     r"deal completed|"
     r"resmen açıklandı|resmen aciklandi|"
     r"resmen transfer oldu|"
@@ -102,21 +112,16 @@ OFFICIAL_WORDS = re.compile(
 
 RUMOUR_WORDS = re.compile(
     r"\b(?:"
-    r"reportedly|reports|report|"
-    r"rumour|rumor|"
+    r"reportedly|reports|rumour|rumor|"
     r"could join|may join|"
-    r"interested in|"
-    r"linked with|"
-    r"transfer target|"
-    r"considering|"
-    r"talks|negotiations|"
+    r"interested in|linked with|"
+    r"considering|talks|negotiations|"
     r"bid for|offer for|"
     r"set to|close to|"
     r"iddia|iddialara göre|iddialara gore|"
     r"gündeminde|gundeminde|"
-    r"ilgileniyor|"
-    r"teklif yaptı|teklif yapti|"
-    r"görüşüyor|goruşuyor|gorusuyor|"
+    r"ilgileniyor|teklif yaptı|teklif yapti|"
+    r"görüşüyor|gorusuyor|"
     r"anlaşma yakın|anlasma yakin"
     r")\b",
     re.IGNORECASE
@@ -170,12 +175,16 @@ def save_seen(seen, sha):
 
 
 # ==========================================
-# METİN TEMİZLEME VE ÇEVİRİ
+# METİN TEMİZLEME
 # ==========================================
 
 def clean_html(html):
     soup = BeautifulSoup(html or "", "html.parser")
-    return re.sub(r"\s+", " ", soup.get_text(" ", strip=True)).strip()
+    return re.sub(
+        r"\s+",
+        " ",
+        soup.get_text(" ", strip=True)
+    ).strip()
 
 
 def translate(text):
@@ -217,10 +226,13 @@ def make_summary(entry):
     if not description and entry.get("content"):
         description = entry["content"][0].get("value", "")
 
+    if not description:
+        description = entry.get("description", "")
+
     description = clean_html(description)
 
-    if len(description) < 40:
-        return ""
+    if not description:
+        return "Kaynakta ayrıntılı haber özeti bulunmuyor."
 
     sentences = re.split(r"(?<=[.!?])\s+", description)
 
@@ -234,14 +246,11 @@ def make_summary(entry):
 # ==========================================
 
 def classify(title, summary):
-    title = title.strip()
-    summary = summary.strip()
-
     if BAD_WORDS.search(title):
         return None
 
-    # Öncelikle başlıkta transfer işareti arıyoruz.
-    if TRANSFER_WORDS.search(title):
+    # Başlıkta transfer işareti varsa kabul et.
+    if TRANSFER_SIGNAL.search(title):
         text = title + " " + summary
 
         if OFFICIAL_WORDS.search(text):
@@ -252,12 +261,14 @@ def classify(title, summary):
 
         return "⚽ TRANSFER GELİŞMESİ"
 
-    # Başlıkta yoksa özette daha güçlü transfer ifadeleri arıyoruz.
-    if TRANSFER_WORDS.search(summary):
-        if OFFICIAL_WORDS.search(summary):
+    # Başlıkta bulunmuyorsa özette daha güçlü işaret ara.
+    if STRONG_SUMMARY_SIGNAL.search(summary):
+        text = title + " " + summary
+
+        if OFFICIAL_WORDS.search(text):
             return "✅ RESMÎ TRANSFER"
 
-        if RUMOUR_WORDS.search(summary):
+        if RUMOUR_WORDS.search(text):
             return "🟠 TRANSFER SÖYLENTİSİ"
 
         return "⚽ TRANSFER GELİŞMESİ"
@@ -303,6 +314,8 @@ def get_news(source_name, rss_url):
 
         feed = feedparser.parse(response.content)
 
+        print(f"{source_name}: RSS toplam haber: {len(feed.entries)}")
+
         for entry in feed.entries:
             title = clean_html(entry.get("title", ""))
             link = entry.get("link", "").strip()
@@ -310,7 +323,6 @@ def get_news(source_name, rss_url):
             if not title or not link:
                 continue
 
-            # Video ve yayın sayfalarını ele.
             lowered_link = link.lower()
 
             if any(word in lowered_link for word in [
@@ -323,9 +335,6 @@ def get_news(source_name, rss_url):
                 continue
 
             summary = make_summary(entry)
-
-            if not summary:
-                continue
 
             category = classify(title, summary)
 
@@ -340,8 +349,13 @@ def get_news(source_name, rss_url):
                 "category": category
             })
 
+        print(
+            f"{source_name}: "
+            f"{len(articles)} transfer haberi bulundu."
+        )
+
     except Exception as error:
-        print(f"{source_name} RSS hatası: {error}")
+        print(f"{source_name} RSS HATASI: {error}")
 
     return articles
 
@@ -351,7 +365,9 @@ def get_news(source_name, rss_url):
 # ==========================================
 
 def main():
-    print("Transfer botu başladı.")
+    print("================================")
+    print("RATEBROS TRANSFER BOTU BAŞLADI")
+    print("================================")
 
     seen, sha = load_seen()
     seen_set = set(seen)
@@ -359,17 +375,15 @@ def main():
     new_articles = []
 
     for source_name, rss_url in SOURCES.items():
-        print(f"{source_name} kontrol ediliyor...")
+        print(f"\n{source_name} kontrol ediliyor...")
 
         articles = get_news(source_name, rss_url)
 
         for article in articles:
-            if article["link"] in seen_set:
-                continue
+            if article["link"] not in seen_set:
+                new_articles.append(article)
 
-            new_articles.append(article)
-
-    # Aynı linki farklı kaynaklardan gelirse bir kez gönder.
+    # Tekrarlanan haberleri temizle.
     unique_articles = []
     added_links = set()
 
@@ -377,6 +391,8 @@ def main():
         if article["link"] not in added_links:
             unique_articles.append(article)
             added_links.add(article["link"])
+
+    print("\nToplam yeni haber:", len(unique_articles))
 
     sent_count = 0
 
@@ -399,6 +415,7 @@ def main():
             seen_set.add(article["link"])
 
             sent_count += 1
+
             print("Gönderildi:", article["title"])
 
             time.sleep(1)
@@ -406,12 +423,14 @@ def main():
         except Exception as error:
             print("Telegram gönderim hatası:", error)
 
-    # Liste çok büyümesin.
     seen = seen[-3000:]
 
     save_seen(seen, sha)
 
-    print(f"İşlem tamamlandı. Gönderilen haber: {sent_count}")
+    print("\n================================")
+    print("İŞLEM TAMAMLANDI")
+    print("Gönderilen haber:", sent_count)
+    print("================================")
 
 
 if __name__ == "__main__":
