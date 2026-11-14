@@ -16,7 +16,11 @@ BASE_URL = (
 URLS = {
     "players": BASE_URL + "player_profiles/player_profiles.csv",
     "values": BASE_URL + "player_market_value/player_market_value.csv",
-    "transfers": BASE_URL + "transfer_history/transfer_history.csv",
+    "transfers": (
+        BASE_URL
+        + "raw/player_transfer_histories/"
+        + "player_transfer_histories.csv"
+    ),
 }
 
 SESSION = requests.Session()
@@ -31,8 +35,18 @@ def download_csv(url):
 
     content = response.content
 
-    if content[:2] == b"\x1f\x8b":
+    if content.startswith(b"\x1f\x8b"):
         content = gzip.decompress(content)
+
+    # Git LFS işaretçisi veya HTML hata sayfası kontrolü
+    beginning = content[:500].decode("utf-8", errors="replace")
+
+    if beginning.startswith("version https://git-lfs.github.com/spec/v1"):
+        raise RuntimeError("Dosya Git LFS işaretçisi döndürdü: " + url)
+
+    if beginning.lstrip().lower().startswith("<!doctype html") or \
+       beginning.lstrip().lower().startswith("<html"):
+        raise RuntimeError("CSV yerine HTML döndü: " + url)
 
     text = io.TextIOWrapper(
         io.BytesIO(content),
@@ -40,7 +54,14 @@ def download_csv(url):
         newline=""
     )
 
-    return list(csv.DictReader(text))
+    reader = csv.DictReader(text)
+
+    if not reader.fieldnames:
+        raise RuntimeError("CSV başlıkları bulunamadı: " + url)
+
+    print("CSV sütunları:", reader.fieldnames)
+
+    return list(reader)
 
 
 def clean_row(row):
@@ -91,6 +112,7 @@ def calculate_age(birthday):
         return None
 
     today = date.today()
+
     return today.year - dob.year - (
         (today.month, today.day) < (dob.month, dob.day)
     )
@@ -158,7 +180,6 @@ def main():
     print("       RATEBROS DATABASE")
     print("===================================")
 
-    # 1. Kaynak dosyaları indir
     profile_rows = download_csv(URLS["players"])
     value_rows = download_csv(URLS["values"])
     transfer_rows = download_csv(URLS["transfers"])
@@ -167,7 +188,13 @@ def main():
     print("Değer satırı:", len(value_rows))
     print("Transfer satırı:", len(transfer_rows))
 
-    # 2. Piyasa değerlerini oyuncu ID'sine göre eşleştir
+    if len(transfer_rows) < 100:
+        raise RuntimeError(
+            "Transfer dosyasında beklenenden az kayıt var. "
+            "Veritabanı güncellenmedi."
+        )
+
+    # Piyasa değerleri
     latest_values = {}
     highest_values = {}
     latest_dates = {}
@@ -210,7 +237,7 @@ def main():
 
     print("Piyasa değeri geçmişi:", values_count)
 
-    # 3. Oyuncu profillerini oluştur
+    # Oyuncu profilleri
     players = []
     seen_ids = set()
 
@@ -243,10 +270,7 @@ def main():
                 "position",
                 "player_main_position"
             ),
-            "sub_position": get(
-                row,
-                "player_sub_position"
-            ),
+            "sub_position": get(row, "player_sub_position"),
             "foot": get(row, "foot"),
             "club": get(
                 row,
@@ -255,22 +279,12 @@ def main():
             ),
             "club_id": get(row, "current_club_id"),
             "joined": get(row, "joined"),
-            "contract_expires": get(
-                row,
-                "contract_expires"
-            ),
+            "contract_expires": get(row, "contract_expires"),
             "market_value_eur": latest_values.get(player_id),
             "market_value_date": latest_dates.get(player_id),
             "highest_market_value_eur": highest_values.get(player_id),
-            "image_url": get(
-                row,
-                "player_image_url"
-            ),
-            "transfermarkt_url": get(
-                row,
-                "player_url",
-                "url"
-            )
+            "image_url": get(row, "player_image_url"),
+            "transfermarkt_url": get(row, "player_url", "url")
         })
 
     database = {
@@ -291,7 +305,7 @@ def main():
 
     print("Oyuncu profilleri:", len(players))
 
-    # 4. Transfer geçmişini oluştur
+    # Transfer geçmişi
     def transfer_history():
         for raw in transfer_rows:
             row = clean_row(raw)
