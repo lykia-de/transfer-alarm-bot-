@@ -25,18 +25,14 @@ GITHUB_REPOSITORY = os.getenv("GITHUB_REPOSITORY")
 MAX_NEWS = 10
 MAX_SEEN = 3000
 MAX_WORKERS = 12
-
 HEADERS = {"User-Agent": "Mozilla/5.0 RATEBROS"}
 
 RSS_SOURCES = {
-    # Yabancı kaynaklar
     "Marca": "https://e00-marca.uecdn.es/rss/futbol/mercado-fichajes.xml",
     "CaughtOffside": "https://www.caughtoffside.com/feed/",
     "Sky Sports": "https://www.skysports.com/rss/11095",
     "Football Italia": "https://www.football-italia.net/feed/",
     "Get Football News Germany": "https://www.getfootballnewsgermany.com/feed/",
-
-    # A Spor
     "A Spor": "https://www.aspor.com.tr/rss/news.xml",
     "A Spor Futbol": "https://www.aspor.com.tr/rss/futbol.xml",
     "A Spor Süper Lig": "https://www.aspor.com.tr/rss/spor-toto-super-lig.xml",
@@ -44,8 +40,6 @@ RSS_SOURCES = {
     "A Spor Fenerbahçe": "https://www.aspor.com.tr/rss/fenerbahce.xml",
     "A Spor Galatasaray": "https://www.aspor.com.tr/rss/galatasaray.xml",
     "A Spor Trabzonspor": "https://www.aspor.com.tr/rss/trabzonspor.xml",
-
-    # OrtaPas
     "OrtaPas": "https://ortapas.com/rss",
     "OrtaPas Transfer": "https://ortapas.com/rss/transfer",
     "OrtaPas Süper Lig": "https://ortapas.com/rss/super-lig",
@@ -56,7 +50,6 @@ RSS_SOURCES = {
 }
 
 TRANSFER_WORDS = [
-    # İngilizce
     "transfer", "signing", "signed for", "signs for",
     "sign for", "set to sign", "set to join", "joins",
     "joined", "loan move", "on loan", "loan deal",
@@ -64,23 +57,13 @@ TRANSFER_WORDS = [
     "bid for", "offers for", "offer for", "deal with",
     "transfer deal", "move to", "agreed terms",
     "personal terms", "medical", "interest in",
-    "wants to sign", "target",
-
-    # İspanyolca
-    "fichaje", "fichajes", "ficha por", "fichar por",
-    "acuerdo de fichaje", "principio de acuerdo",
-    "oferta por", "cesion", "mercado de fichajes",
-    "salida del club",
-
-    # Almanca / İtalyanca / Fransızca
-    "wechsel zu", "verpflichtet", "leihe zu",
+    "wants to sign", "target", "fichaje", "fichajes",
+    "ficha por", "fichar por", "oferta por",
+    "mercado de fichajes", "wechsel zu", "verpflichtet",
     "trasferimento", "accordo", "offerta per",
-    "transfert", "accord de transfert", "signe avec",
-
-    # Türkçe
-    "transfer", "anlaşma sağladı", "anlaşmaya vardı",
-    "imza attı", "imzayı attı", "sözleşme imzaladı",
-    "sözleşme teklif", "kiralık olarak", "kiraladı",
+    "transfert", "accord de transfert",
+    "anlaşma sağladı", "anlaşmaya vardı", "imza attı",
+    "sözleşme imzaladı", "kiralık olarak", "kiraladı",
     "kiralıyor", "bonservisini aldı", "kadrosuna kattı",
     "takımdan ayrılıyor", "ayrılacak", "ayrılığı gündemde",
     "resmî teklif", "resmi teklif", "teklif yaptı",
@@ -105,25 +88,22 @@ PLAYER_ALIASES = [
     "Mauro Icardi", "Baris Alper Yilmaz", "Orkun Kokcu",
     "Kenan Yildiz", "Hakan Calhanoglu", "Arda Guler",
     "Ferdi Kadioglu", "Enes Unal", "Antony", "Neymar",
-    "Rodri", "Endrick", "Felix Nmecha",
-    "Victor Boniface", "Jonathan David", "Mason Greenwood",
-    "Randal Kolo Muani", "Khvicha Kvaratskhelia",
-    "Alexander Sorloth", "Benjamin Sesko", "Xavi Simons",
-    "Jeremie Frimpong", "Ousmane Dembele", "Bernardo Silva",
-    "Ilkay Gundogan", "Thomas Muller", "Nicolo Barella",
-    "Marcus Thuram", "Dusan Vlahovic", "Paulo Dybala",
-    "Sandro Tonali", "Ruben Dias", "William Saliba",
-    "Gabriel Jesus", "Gabriel Martinelli", "Kai Havertz",
-    "Son Heung Min", "Virgil van Dijk",
-    "Trent Alexander Arnold", "Darwin Nunez", "Luis Diaz",
-    "Alexis Mac Allister", "Dominik Szoboszlai",
-    "Martin Zubimendi", "Mikel Merino", "Nicolas Jackson",
-    "Christopher Nkunku", "Jadon Sancho", "Joao Palhinha",
-    "Matthijs de Ligt", "Manuel Neuer", "Leroy Sane",
-    "Serge Gnabry", "Kingsley Coman", "Milan Skriniar",
-    "Ederson", "Alisson Becker",
-
-    # Türkiye'de sık gündeme gelenler
+    "Rodri", "Endrick", "Felix Nmecha", "Victor Boniface",
+    "Jonathan David", "Mason Greenwood", "Randal Kolo Muani",
+    "Khvicha Kvaratskhelia", "Alexander Sorloth",
+    "Benjamin Sesko", "Xavi Simons", "Jeremie Frimpong",
+    "Ousmane Dembele", "Bernardo Silva", "Ilkay Gundogan",
+    "Thomas Muller", "Nicolo Barella", "Marcus Thuram",
+    "Dusan Vlahovic", "Paulo Dybala", "Sandro Tonali",
+    "Ruben Dias", "William Saliba", "Gabriel Jesus",
+    "Gabriel Martinelli", "Kai Havertz", "Son Heung Min",
+    "Virgil van Dijk", "Trent Alexander Arnold",
+    "Darwin Nunez", "Luis Diaz", "Alexis Mac Allister",
+    "Dominik Szoboszlai", "Martin Zubimendi", "Mikel Merino",
+    "Nicolas Jackson", "Christopher Nkunku", "Jadon Sancho",
+    "Joao Palhinha", "Matthijs de Ligt", "Manuel Neuer",
+    "Leroy Sane", "Serge Gnabry", "Kingsley Coman",
+    "Milan Skriniar", "Ederson", "Alisson Becker",
     "Ciro Immobile", "Rafa Silva", "Gedson Fernandes",
     "Milot Rashica", "Semih Kilicsoy", "Victor Nelsson",
     "Davinson Sanchez", "Lucas Torreira", "Dries Mertens",
@@ -137,6 +117,11 @@ PLAYER_ALIASES = [
     "Altay Bayindir", "Merih Demiral", "Caglar Soyuncu",
     "Zeki Celik",
 ]
+
+# Bilinen kulüpler. Bu listeyi players.json verisi tamamlayabilir.
+KNOWN_CLUBS = {
+    "milot rashica": "Besiktas",
+}
 
 # ==========================================
 # METİN İŞLEME
@@ -155,21 +140,38 @@ def normalized_text(value):
     return " ".join(normalize(value))
 
 
-def extract_names(data):
+def extract_player_data(data):
+    """Oyuncu isimlerini ve varsa kulüp bilgisini JSON içinden bulur."""
     names = set()
-    fields = (
+    clubs = {}
+
+    name_fields = (
         "name", "player_name", "full_name",
         "player", "playerName", "fullName"
+    )
+    club_fields = (
+        "team", "club", "current_team", "current_club",
+        "team_name", "club_name", "currentTeam",
+        "currentClub", "teamName", "clubName"
     )
 
     def walk(obj):
         if isinstance(obj, dict):
-            for field in fields:
+            player_name = None
+
+            for field in name_fields:
                 value = obj.get(field)
-                if isinstance(value, str):
-                    value = value.strip()
-                    if len(value.split()) >= 2 and len(value) >= 5:
-                        names.add(value)
+                if isinstance(value, str) and len(value.split()) >= 2:
+                    player_name = value.strip()
+                    names.add(player_name)
+                    break
+
+            if player_name:
+                for field in club_fields:
+                    value = obj.get(field)
+                    if isinstance(value, str) and value.strip():
+                        clubs[normalized_text(player_name)] = value.strip()
+                        break
 
             for value in obj.values():
                 if isinstance(value, (dict, list)):
@@ -180,27 +182,28 @@ def extract_names(data):
                 walk(item)
 
     walk(data)
-    return names
+    return names, clubs
 
-
-# ==========================================
-# OYUNCU İNDEKSİ
-# ==========================================
 
 def load_players():
     names = set(PLAYER_ALIASES)
+    clubs = dict(KNOWN_CLUBS)
 
     try:
         with open("players.json", "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        names.update(extract_names(data))
-        print(f"Oyuncu veritabanı: {len(names):,} isim")
+        database_names, database_clubs = extract_player_data(data)
+        names.update(database_names)
+        clubs.update(database_clubs)
+
+        print("Oyuncu veritabanı:", len(names), "isim")
+        print("Kulüp kaydı:", len(clubs), "oyuncu")
 
     except Exception as error:
         print("Oyuncu veritabanı hatası:", error)
 
-    return names
+    return names, clubs
 
 
 def build_indexes(names):
@@ -209,12 +212,10 @@ def build_indexes(names):
 
     for name in names:
         tokens = normalize(name)
-
         if len(tokens) < 2:
             continue
 
         node = full_index
-
         for token in tokens:
             node = node.setdefault(token, {})
 
@@ -227,7 +228,6 @@ def build_indexes(names):
         if len(candidates) == 1
     }
 
-    print("Oyuncu indeksi hazır.")
     return full_index, unique_surnames
 
 
@@ -238,59 +238,138 @@ def find_players(title, indexes):
 
     for start in range(len(words)):
         node = full_index
-
         for position in range(start, len(words)):
             word = words[position]
-
             if word not in node:
                 break
 
             node = node[word]
-
             for name in node.get("_names", []):
                 if name not in found:
                     found.append(name)
 
-    raw_words = re.findall(
-        r"\b[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'-]*\b", title
-    )
+    # Tek başına soyadı eşleşmesi yanlış sonuç üretebilir.
+    # Bu nedenle soyadı eşleşmesini yalnızca başlıkta tam ad yoksa kullan.
+    if not found:
+        raw_words = re.findall(r"\b[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'-]*\b", title)
 
-    for i, raw_word in enumerate(raw_words):
-        token = normalize(raw_word)
-
-        if len(token) != 1:
-            continue
-
-        name = surname_index.get(token[0])
-
-        if not name:
-            continue
-
-        if i + 1 < len(raw_words):
-            if raw_words[i + 1][:1].isupper():
+        for raw_word in raw_words:
+            token = normalize(raw_word)
+            if len(token) != 1:
                 continue
 
-        if name not in found:
-            found.append(name)
+            name = surname_index.get(token[0])
+            if name and name not in found:
+                found.append(name)
 
     return found
 
 
 # ==========================================
-# TRANSFER FİLTRESİ
+# TRANSFER HABERİ SINIFLANDIRMA
 # ==========================================
+
+REPLACEMENT_PATTERNS = [
+    r"\b(.+?) yerine\b",
+    r"\b(.+?)'nin yerine\b",
+    r"\b(.+?) yerine gelecek\b",
+    r"\b(.+?) yerine geliyor\b",
+    r"\binstead of\b",
+    r"\breplace(?:s|d|ment)?\b",
+    r"\breplacement for\b",
+    r"\bremplace\b",
+    r"\bal posto di\b",
+]
+
+INCOMING_PATTERNS = [
+    r"\btransfer ediyor\b",
+    r"\btransfer etmek istiyor\b",
+    r"\bkadrosuna kat",
+    r"\btransfer listesine aldı\b",
+    r"\bteklif yaptı\b",
+    r"\bteklif sundu\b",
+    r"\banlaşma sağladı\b",
+    r"\bimza at",
+    r"\bgeliyor\b",
+    r"\bgelecek\b",
+    r"\bjoin(?:s|ed)?\b",
+    r"\bsign(?:s|ed)?\b",
+    r"\bset to join\b",
+    r"\bmove to\b",
+    r"\bfichar\b",
+    r"\bwechselt zu\b",
+]
+
+OUTGOING_PATTERNS = [
+    r"\btakımdan ayrıl",
+    r"\bkulüpten ayrıl",
+    r"\bsatış listesinde\b",
+    r"\bsatmak istiyor\b",
+    r"\bgönderilecek\b",
+    r"\bgönderiyor\b",
+    r"\byolcu\b",
+    r"\bveda ediyor\b",
+    r"\bveda edecek\b",
+    r"\bleave(?:s|ing)?\b",
+    r"\bdepart(?:s|ure)?\b",
+    r"\bexit\b",
+    r"\bsold\b",
+    r"\bsale\b",
+    r"\bloaned out\b",
+    r"\bloan move\b",
+    r"\bwechseln\b",
+]
+
+def has_pattern(text, patterns):
+    return any(re.search(pattern, text) for pattern in patterns)
+
 
 def is_transfer_news(title):
     text = normalized_text(title)
+    return any(normalized_text(term) in text for term in TRANSFER_WORDS)
 
-    return any(
-        normalized_text(term) in text
-        for term in TRANSFER_WORDS
-    )
+
+def classify_article(title, player):
+    """
+    Dönen değer:
+    incoming, outgoing veya reject.
+    Başlık yeterli bilgi vermiyorsa haber gönderilmez.
+    """
+    text = normalized_text(title)
+    player_text = normalized_text(player)
+
+    # Oyuncu başka birinin yerine gelecek hedef değilse,
+    # bu başlık oyuncunun transferini anlatmıyor olabilir.
+    for pattern in REPLACEMENT_PATTERNS:
+        match = re.search(pattern, text)
+
+        if match:
+            phrase = normalized_text(match.group(0))
+            if player_text in phrase or any(
+                token in phrase.split()
+                for token in player_text.split()
+            ):
+                return "reject"
+
+            # "Rashica yerine X gelecek" türü başlıkta Rashica
+            # başlığın transfer hedefi değildir.
+            before = text[:match.start()]
+            after = text[match.end():]
+
+            if player_text in before or player_text in after:
+                return "reject"
+
+    if has_pattern(text, OUTGOING_PATTERNS):
+        return "outgoing"
+
+    if has_pattern(text, INCOMING_PATTERNS):
+        return "incoming"
+
+    return "reject"
 
 
 # ==========================================
-# HABER TEKRARI
+# HABER TEKRARI VE KÜMELEME
 # ==========================================
 
 STOP_WORDS = {
@@ -324,11 +403,8 @@ def canonical_link(link):
     try:
         parts = urlsplit(link)
         return urlunsplit((
-            parts.scheme,
-            parts.netloc.lower(),
-            parts.path.rstrip("/"),
-            "",
-            "",
+            parts.scheme, parts.netloc.lower(),
+            parts.path.rstrip("/"), "", ""
         ))
     except Exception:
         return link
@@ -381,25 +457,18 @@ def translate_to_turkish(text):
         response = requests.get(
             "https://translate.googleapis.com/translate_a/single",
             params={
-                "client": "gtx",
-                "sl": "auto",
-                "tl": "tr",
-                "dt": "t",
-                "q": text,
+                "client": "gtx", "sl": "auto",
+                "tl": "tr", "dt": "t", "q": text,
             },
             headers=HEADERS,
             timeout=8,
         )
-
         response.raise_for_status()
         data = response.json()
 
         translated = "".join(
-            part[0]
-            for part in data[0]
-            if part and part[0]
+            part[0] for part in data[0] if part and part[0]
         )
-
         return translated.strip() or text
 
     except Exception as error:
@@ -413,14 +482,10 @@ def translate_to_turkish(text):
 
 def fetch_feed(source, url):
     try:
-        response = requests.get(
-            url,
-            headers=HEADERS,
-            timeout=12,
-        )
+        response = requests.get(url, headers=HEADERS, timeout=12)
         response.raise_for_status()
-
         feed = feedparser.parse(response.content)
+
         articles = []
 
         for entry in feed.entries:
@@ -464,7 +529,6 @@ def get_all_news():
 
     for article in results:
         key = article_key(article)
-
         if key not in unique:
             unique[key] = article
 
@@ -500,16 +564,13 @@ def load_seen():
     if url and GITHUB_TOKEN:
         try:
             response = requests.get(
-                url,
-                headers=github_headers(),
-                timeout=12,
+                url, headers=github_headers(), timeout=12
             )
 
             if response.status_code == 200:
                 content = response.json()["content"]
                 decoded = base64.b64decode(content).decode("utf-8")
                 data = json.loads(decoded)
-
                 print("Önceden görülen haber:", len(data))
                 return set(data)
 
@@ -536,9 +597,7 @@ def save_seen(seen):
 
     try:
         response = requests.get(
-            url,
-            headers=github_headers(),
-            timeout=12,
+            url, headers=github_headers(), timeout=12
         )
 
         sha = None
@@ -549,11 +608,7 @@ def save_seen(seen):
             print("GitHub okuma hatası:", response.status_code)
             return
 
-        content = json.dumps(
-            data,
-            ensure_ascii=False,
-            indent=2,
-        )
+        content = json.dumps(data, ensure_ascii=False, indent=2)
 
         payload = {
             "message": "Update RATEBROS seen news",
@@ -566,10 +621,8 @@ def save_seen(seen):
             payload["sha"] = sha
 
         result = requests.put(
-            url,
-            headers=github_headers(),
-            json=payload,
-            timeout=15,
+            url, headers=github_headers(),
+            json=payload, timeout=15
         )
 
         if result.status_code in (200, 201):
@@ -587,9 +640,7 @@ def save_seen(seen):
 
 def send_telegram(cluster):
     articles = cluster["articles"]
-    players = sorted(cluster["players"])
 
-    # En bilinen kaynaklardan gelen haberi seç.
     source_order = [
         "Sky Sports", "Marca", "A Spor",
         "A Spor Futbol", "A Spor Süper Lig",
@@ -597,22 +648,29 @@ def send_telegram(cluster):
         "OrtaPas", "OrtaPas Transfer", "CaughtOffside",
     ]
 
-    best_article = max(
+    best_article = min(
         articles,
         key=lambda article: (
             source_order.index(article["source"])
             if article["source"] in source_order
             else len(source_order)
-        ) * -1
+        )
     )
 
-    translated_title = translate_to_turkish(
-        best_article["title"]
-    )
+    player = cluster["players"][0]
+    translated_title = translate_to_turkish(best_article["title"])
+
+    direction = best_article["direction"]
+
+    if direction == "incoming":
+        direction_text = "Gelen transfer"
+    else:
+        direction_text = "Ayrılık / giden transfer"
 
     message = (
         "🚨 <b>RATEBROS TRANSFER</b>\n\n"
-        f"⚽ <b>Oyuncu:</b> {escape(', '.join(players))}\n"
+        f"⚽ <b>Oyuncu:</b> {escape(player)}\n"
+        f"🔄 <b>Durum:</b> {direction_text}\n"
         f"📰 <b>Haber:</b> {escape(translated_title)}\n"
         f"🌍 <b>Kaynak:</b> {escape(best_article['source'])}\n\n"
         f'🔗 <a href="{escape(best_article["link"], quote=True)}">Haberi Oku</a>'
@@ -659,11 +717,10 @@ def main():
         print("Telegram ayarları eksik!")
         return
 
-    players = load_players()
+    players, player_clubs = load_players()
     indexes = build_indexes(players)
 
     print("\nRSS kontrol ediliyor...")
-
     articles = get_all_news()
     seen = load_seen()
 
@@ -686,11 +743,28 @@ def main():
             print("Oyuncu eşleşmedi:", article["title"])
             continue
 
+        # Başlıkta birden fazla oyuncu varsa belirsiz olabilir.
+        # Şimdilik yalnızca tek oyunculu haberleri gönder.
+        if len(matched) != 1:
+            print("Birden fazla oyuncu bulundu, atlandı:", article["title"])
+            continue
+
+        player = matched[0]
+        direction = classify_article(article["title"], player)
+
+        if direction == "reject":
+            print("Belirsiz / oyuncu hedef değil, atlandı:", article["title"])
+            continue
+
+        club = player_clubs.get(normalized_text(player))
+
         article["players"] = matched
+        article["direction"] = direction
+        article["player_club"] = club
         article["seen_key"] = key
 
-        print("TRANSFER HABERİ:", article["title"])
-        print("Oyuncular:", matched)
+        print("TRANSFER ADAYI:", article["title"])
+        print("Oyuncu:", player, "| Kulüp:", club, "| Tür:", direction)
 
         candidates.append(article)
 
@@ -702,11 +776,22 @@ def main():
     sent = 0
 
     for cluster in clusters[:MAX_NEWS]:
+        # Küme içindeki ilk oyuncunun yönünü kullan.
+        directions = {
+            article["direction"] for article in cluster["articles"]
+        }
+
+        # Aynı oyuncu için çelişkili haberleri göndermiyoruz.
+        if len(directions) != 1:
+            print("Çelişkili haber kümesi atlandı.")
+            continue
+
+        cluster["players"] = sorted(cluster["players"])
+
         if send_telegram(cluster):
             for article in cluster["articles"]:
                 seen.add(article["seen_key"])
                 seen.add(article["id"])
-
             sent += 1
 
         time.sleep(1)
